@@ -1,4 +1,5 @@
 import express from 'express';
+import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import xss  from 'xss-clean';
 import mongoSanitize from 'express-mongo-sanitize';
@@ -27,6 +28,9 @@ app.use(helmet());
 // parse json request body
 app.use(express.json());
 
+// parse cookies (needed for auth from cookie)
+app.use(cookieParser());
+
 // parse urlencoded request body
 app.use(express.urlencoded({ extended: true }));
 
@@ -38,8 +42,19 @@ app.use(mongoSanitize());
 app.use(compression());
 
 // enable cors
-app.use(cors());
-app.options('*', cors());
+app.use(
+  cors({
+    origin: config.corsOrigin || true,
+    credentials: true,
+  })
+);
+app.options(
+  '*',
+  cors({
+    origin: config.corsOrigin || true,
+    credentials: true,
+  })
+);
 
 // jwt authentication
 app.use(passport.initialize());

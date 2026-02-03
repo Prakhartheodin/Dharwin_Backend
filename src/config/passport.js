@@ -3,10 +3,18 @@ import config from './config.js';
 import { tokenTypes } from './tokens.js';
 import User from '../models/user.model.js';
 
+const ACCESS_TOKEN_COOKIE = 'accessToken';
+
+const jwtFromRequest = (req) => {
+  if (req.cookies?.[ACCESS_TOKEN_COOKIE]) {
+    return req.cookies[ACCESS_TOKEN_COOKIE];
+  }
+  return ExtractJwt.fromAuthHeaderAsBearerToken()(req);
+};
 
 const jwtOptions = {
   secretOrKey: config.jwt.secret,
-  jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+  jwtFromRequest,
 };
 
 const jwtVerify = async (payload, done) => {
