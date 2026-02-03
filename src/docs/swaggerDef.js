@@ -1,4 +1,4 @@
-import packageJson from '../../package.json' assert { type: 'json' };
+import packageJson from '../../package.json' with { type: 'json' };
 
 const { version } = packageJson;
 import config from '../config/config.js';
