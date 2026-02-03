@@ -16,6 +16,9 @@ const loginUserWithEmailAndPassword = async (email, password) => {
   if (!user || !(await user.isPasswordMatch(password))) {
     throw new ApiError(httpStatus.UNAUTHORIZED, 'Incorrect email or password');
   }
+  if (user.status !== 'active') {
+    throw new ApiError(httpStatus.UNAUTHORIZED, 'Account is disabled or deleted');
+  }
   return user;
 };
 
@@ -41,7 +44,7 @@ const refreshAuth = async (refreshToken) => {
   try {
     const refreshTokenDoc = await verifyToken(refreshToken, tokenTypes.REFRESH);
     const user = await getUserById(refreshTokenDoc.user);
-    if (!user) {
+    if (!user || user.status !== 'active') {
       throw new Error();
     }
     await refreshTokenDoc.remove();

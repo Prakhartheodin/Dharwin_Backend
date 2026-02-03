@@ -8,6 +8,8 @@ const createUser = {
     password: Joi.string().required().custom(password),
     name: Joi.string().required(),
     role: Joi.string().required().valid('user', 'admin'),
+    roleIds: Joi.array().items(Joi.string().custom(objectId)).default([]),
+    status: Joi.string().valid('active', 'disabled', 'deleted').default('active'),
   }),
 };
 
@@ -15,6 +17,7 @@ const getUsers = {
   query: Joi.object().keys({
     name: Joi.string(),
     role: Joi.string(),
+    status: Joi.string().valid('active', 'disabled', 'deleted'),
     sortBy: Joi.string(),
     limit: Joi.number().integer(),
     page: Joi.number().integer(),
@@ -36,6 +39,8 @@ const updateUser = {
       email: Joi.string().email(),
       password: Joi.string().custom(password),
       name: Joi.string(),
+      roleIds: Joi.array().items(Joi.string().custom(objectId)),
+      status: Joi.string().valid('active', 'disabled', 'deleted'),
     })
     .min(1),
 };

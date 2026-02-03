@@ -46,6 +46,16 @@ const userSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    roleIds: {
+      type: [mongoose.Schema.Types.ObjectId],
+      ref: 'Role',
+      default: [],
+    },
+    status: {
+      type: String,
+      enum: ['active', 'disabled', 'deleted'],
+      default: 'active',
+    },
   },
   {
     timestamps: true,

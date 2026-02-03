@@ -13,11 +13,21 @@ components:
         role:
           type: string
           enum: [user, admin]
+        roleIds:
+          type: array
+          items:
+            type: string
+          description: Array of Role IDs
+        status:
+          type: string
+          enum: [active, disabled, deleted]
       example:
         id: 5ebac534954b54139806c112
         email: fake@example.com
         name: fake name
         role: user
+        roleIds: []
+        status: active
 
     Token:
       type: object
