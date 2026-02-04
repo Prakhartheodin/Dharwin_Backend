@@ -11,7 +11,7 @@ const createUser = catchAsync(async (req, res) => {
 });
 
 const getUsers = catchAsync(async (req, res) => {
-  const filter = pick(req.query, ['name', 'role', 'status']);
+  const filter = pick(req.query, ['name', 'role', 'status', 'search']);
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await userService.queryUsers(filter, options);
   res.send(result);
@@ -31,6 +31,9 @@ const updateUser = catchAsync(async (req, res) => {
 });
 
 const deleteUser = catchAsync(async (req, res) => {
+  // Invalidate only the deleted user's tokens (see user.service.deleteUserById).
+  // Do not clear or overwrite the requester's cookies.
+  // Frontend should avoid offering "delete" on the currently logged-in user's row to prevent session loss.
   await userService.deleteUserById(req.params.userId);
   res.status(httpStatus.NO_CONTENT).send();
 });

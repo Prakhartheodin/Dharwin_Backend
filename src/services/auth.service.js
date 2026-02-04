@@ -16,6 +16,9 @@ const loginUserWithEmailAndPassword = async (email, password) => {
   if (!user || !(await user.isPasswordMatch(password))) {
     throw new ApiError(httpStatus.UNAUTHORIZED, 'Incorrect email or password');
   }
+  if (user.status === 'pending') {
+    throw new ApiError(httpStatus.UNAUTHORIZED, 'Your account is pending approval. An administrator must activate your account before you can sign in.');
+  }
   if (user.status !== 'active') {
     throw new ApiError(httpStatus.UNAUTHORIZED, 'Account is disabled or deleted');
   }

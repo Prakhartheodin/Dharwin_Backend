@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 
 import ApiError from '../utils/ApiError.js';
 import User from '../models/user.model.js';
+import Token from '../models/token.model.js';
 
 
 /**
@@ -18,7 +19,7 @@ const createUser = async (userBody) => {
 
 /**
  * Query for users
- * @param {Object} filter - Mongo filter
+ * @param {Object} filter - Mongo filter (name, role, status, search)
  * @param {Object} options - Query options
  * @param {string} [options.sortBy] - Sort option in the format: sortField:(desc|asc)
  * @param {number} [options.limit] - Maximum number of results per page (default = 10)
@@ -26,7 +27,17 @@ const createUser = async (userBody) => {
  * @returns {Promise<QueryResult>}
  */
 const queryUsers = async (filter, options) => {
-  const users = await User.paginate(filter, options);
+  const { search, ...restFilter } = filter;
+  const mongoFilter = { ...restFilter };
+  if (search && search.trim()) {
+    const trimmed = search.trim();
+    const searchRegex = new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    mongoFilter.$or = [
+      { name: { $regex: searchRegex } },
+      { email: { $regex: searchRegex } },
+    ];
+  }
+  const users = await User.paginate(mongoFilter, options);
   return users;
 };
 
@@ -68,7 +79,9 @@ const updateUserById = async (userId, updateBody) => {
 };
 
 /**
- * Delete user by id
+ * Delete user by id.
+ * Invalidates only the deleted user's sessions/tokens (Token documents for that user).
+ * Does not touch the requester's session or cookies.
  * @param {ObjectId} userId
  * @returns {Promise<User>}
  */
@@ -78,6 +91,8 @@ const deleteUserById = async (userId) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
   }
   await user.remove();
+  // Invalidate only this user's tokens (refresh, reset, verify). Do not touch the requester's tokens.
+  await Token.deleteMany({ user: userId });
   return user;
 };
 

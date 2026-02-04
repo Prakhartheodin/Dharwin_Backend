@@ -32,11 +32,26 @@ const clearAuthCookies = (res) => {
   res.clearCookie(REFRESH_TOKEN_COOKIE, options);
 };
 
+/**
+ * Administrator registers a user (POST /v1/auth/register).
+ * Do not issue tokens or set cookies for the new user — leave the requester (admin) logged in.
+ */
 const register = catchAsync(async (req, res) => {
   const user = await createUser(req.body);
-  const tokens = await generateAuthTokens(user);
-  setAuthCookies(res, tokens);
-  res.status(httpStatus.CREATED).send({ user, tokens });
+  res.status(httpStatus.CREATED).send({ user });
+});
+
+/**
+ * Public registration: no auth required. User is created with status 'pending'.
+ * They cannot login or access the system until an administrator sets status to 'active'.
+ * No tokens or cookies are issued.
+ */
+const publicRegister = catchAsync(async (req, res) => {
+  const user = await createUser({ ...req.body, status: 'pending' });
+  res.status(httpStatus.CREATED).send({
+    user,
+    message: 'Registration successful. Your account is pending administrator approval. You will be able to sign in once activated.',
+  });
 });
 
 const login = catchAsync(async (req, res) => {
@@ -95,6 +110,7 @@ const getMe = catchAsync(async (req, res) => {
 
 export {
   register,
+  publicRegister,
   login,
   logout,
   refreshTokens,
