@@ -210,12 +210,13 @@ Response objects also include: `id`, `createdAt`, `updatedAt`.
 
 **Errors**
 
-| Status | When |
-|--------|------|
-| 400 | Invalid roleId |
-| 401 | Unauthorized |
-| 403 | Forbidden |
-| 404 | Role not found |
+| Status | When | Example body |
+|--------|------|--------------|
+| 400 | Invalid roleId | Joi validation payload |
+| 400 | Role is assigned to active users | `{ "code": 400, "message": "Role cannot be deleted because it is assigned to one or more active users" }` |
+| 401 | Unauthorized | `{ "code": 401, "message": "Please authenticate" }` |
+| 403 | Forbidden | `{ "code": 403, "message": "Forbidden" }` |
+| 404 | Role not found | `{ "code": 404, "message": "Role not found" }` |
 
 ---
 

@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 
 import ApiError from '../utils/ApiError.js';
 import Role from '../models/role.model.js';
+import User from '../models/user.model.js';
 
 /**
  * Create a role
@@ -67,6 +68,16 @@ const deleteRoleById = async (roleId) => {
   if (!role) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Role not found');
   }
+
+  // Prevent deleting roles that are currently assigned to active users
+  const isAssignedToActiveUser = await User.exists({ roleIds: roleId, status: 'active' });
+  if (isAssignedToActiveUser) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'Role cannot be deleted because it is assigned to one or more active users'
+    );
+  }
+
   await role.remove();
   return role;
 };
