@@ -5,7 +5,6 @@ import catchAsync from '../utils/catchAsync.js';
 import * as studentService from '../services/student.service.js';
 import * as activityLogService from '../services/activityLog.service.js';
 import { ActivityActions, EntityTypes } from '../config/activityLog.js';
-import { isS3Configured } from '../config/s3.js';
 
 const getStudents = catchAsync(async (req, res) => {
   const filter = pick(req.query, ['status', 'search']);
@@ -48,45 +47,9 @@ const deleteStudent = catchAsync(async (req, res) => {
   res.status(httpStatus.NO_CONTENT).send();
 });
 
-const uploadProfilePicture = catchAsync(async (req, res) => {
-  if (!isS3Configured()) {
-    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'S3 is not configured. Set AWS_* environment variables.');
-  }
-  if (!req.file) {
-    throw new ApiError(httpStatus.BAD_REQUEST, 'No file provided');
-  }
-  const student = await studentService.uploadStudentProfilePicture(req.params.studentId, req.file);
-  await activityLogService.createActivityLog(
-    req.user.id,
-    ActivityActions.STUDENT_UPDATE,
-    EntityTypes.STUDENT,
-    student.id,
-    { field: 'profilePicture' },
-    req
-  );
-  res.status(httpStatus.OK).json({
-    success: true,
-    message: 'Profile picture uploaded successfully',
-    data: student,
-  });
-});
-
-const getProfilePicture = catchAsync(async (req, res) => {
-  if (!isS3Configured()) {
-    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'S3 is not configured. Set AWS_* environment variables.');
-  }
-  const presignedUrl = await studentService.getStudentProfilePictureUrl(req.params.studentId);
-  if (!presignedUrl) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Student has no profile picture');
-  }
-  res.redirect(presignedUrl);
-});
-
 export {
   getStudents,
   getStudent,
   updateStudent,
   deleteStudent,
-  uploadProfilePicture,
-  getProfilePicture,
 };

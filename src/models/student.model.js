@@ -69,15 +69,9 @@ const studentSchema = mongoose.Schema(
         uploadedAt: { type: Date, default: Date.now },
       },
     ],
-    // Profile Image (S3 key is source of truth; url is API path for loading the image)
-    profileImageKey: {
-      type: String,
-      trim: true,
-      default: null,
-    },
+    // Profile Image
     profileImageUrl: {
       type: String,
-      trim: true,
       default: null,
     },
     // Additional Info

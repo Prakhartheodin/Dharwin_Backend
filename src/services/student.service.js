@@ -3,7 +3,6 @@ import ApiError from '../utils/ApiError.js';
 import Student from '../models/student.model.js';
 import { createUser } from './user.service.js';
 import { getRoleByName } from './role.service.js';
-import * as uploadService from './upload.service.js';
 
 /**
  * Register a new student
@@ -20,7 +19,7 @@ const registerStudent = async (studentBody, isAdminRegistration = false) => {
   }
 
   // Extract user fields and student profile fields
-  const { phone, dateOfBirth, gender, address, education, experience, skills, documents, bio, profileImageUrl, profileImageKey, ...userFields } = studentBody;
+  const { phone, dateOfBirth, gender, address, education, experience, skills, documents, bio, profileImageUrl, ...userFields } = studentBody;
 
   // Prepare user data
   const userData = {
@@ -45,8 +44,7 @@ const registerStudent = async (studentBody, isAdminRegistration = false) => {
     skills: skills || [],
     documents: documents || [],
     bio,
-    profileImageUrl: profileImageUrl || null,
-    profileImageKey: profileImageKey || null,
+    profileImageUrl,
     status: 'active',
   };
 
@@ -130,39 +128,6 @@ const deleteStudentById = async (studentId) => {
   return student;
 };
 
-/**
- * Upload profile picture for a student. Uploads file to S3 and updates student with key and API URL.
- * @param {ObjectId} studentId
- * @param {object} file - Multer file (buffer, originalname, mimetype, size)
- * @returns {Promise<Student>}
- */
-const uploadStudentProfilePicture = async (studentId, file) => {
-  const student = await getStudentById(studentId);
-  if (!student) {
-    throw new ApiError(httpStatus.NOT_FOUND, 'Student not found');
-  }
-  const result = await uploadService.uploadFileToS3(file, String(studentId), 'profile-pictures');
-  const profileImageUrl = `/training/students/${studentId}/profile-picture`;
-  await updateStudentById(studentId, {
-    profileImageKey: result.key,
-    profileImageUrl,
-  });
-  return getStudentById(studentId);
-};
-
-/**
- * Get a short-lived presigned URL for the student's profile picture.
- * @param {ObjectId} studentId
- * @returns {Promise<string|null>} Presigned URL or null if no profile picture
- */
-const getStudentProfilePictureUrl = async (studentId) => {
-  const student = await getStudentById(studentId);
-  if (!student || !student.profileImageKey) {
-    return null;
-  }
-  return uploadService.getPresignedDownloadUrlForKey(student.profileImageKey, 5 * 60); // 5 minutes
-};
-
 export {
   registerStudent,
   queryStudents,
@@ -170,6 +135,4 @@ export {
   getStudentByUserId,
   updateStudentById,
   deleteStudentById,
-  uploadStudentProfilePicture,
-  getStudentProfilePictureUrl,
 };
