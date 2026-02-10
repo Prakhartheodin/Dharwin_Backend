@@ -51,7 +51,8 @@ This document outlines the plan for implementing student management APIs. The ke
 │ - skills[]      │
 │ - documents[]   │
 │ - bio           │
-│ - profileImageUrl│
+│ - profileImageKey │  ← S3 key (source of truth for profile picture)
+│ - profileImageUrl  │  ← API path to load image
 │ - status        │
 └─────────────────┘
 ```
@@ -124,7 +125,10 @@ This document outlines the plan for implementing student management APIs. The ke
   
   // Additional Info
   bio: String,
-  profileImageUrl: String,
+  
+  // Profile picture (S3: key stored; url = API path for loading)
+  profileImageKey: String,   // S3 object key
+  profileImageUrl: String,   // e.g. /v1/training/students/:id/profile-picture
   
   // Status
   status: Enum['active', 'inactive'],
@@ -245,6 +249,18 @@ This document outlines the plan for implementing student management APIs. The ke
 - **Response:** 204 No Content
 - **Activity Log:** Logged
 
+#### 4.5 Profile Picture
+- **GET** `/v1/training/students/:studentId/profile-picture`
+  - **Auth:** Required (`students.read`)
+  - **Response:** 302 redirect to short-lived presigned S3 URL (or 404 if no picture)
+- **POST** `/v1/training/students/:studentId/profile-picture`
+  - **Auth:** Required (`students.manage`)
+  - **Body:** `multipart/form-data`, field name **`file`** (image file)
+  - **Response:** 200 OK with updated student (includes `profileImageUrl`, `profileImageKey`)
+  - **Activity Log:** Logged (STUDENT_UPDATE, field: profilePicture)
+
+Profile picture is stored in S3 under key `profile-pictures/<studentId>/<timestamp>-<filename>`. The student document stores `profileImageKey` (S3 key) and `profileImageUrl` (API path for the frontend to load the image). See **docs/STUDENT_API_FRONTEND.md** for frontend integration details.
+
 ---
 
 ### Phase 5: File Structure
@@ -310,6 +326,8 @@ src/
 - `GET /v1/training/students/:studentId` - Get student by ID
 - `PATCH /v1/training/students/:studentId` - Update student profile
 - `DELETE /v1/training/students/:studentId` - Delete student
+- `GET /v1/training/students/:studentId/profile-picture` - Get profile picture (redirects to image)
+- `POST /v1/training/students/:studentId/profile-picture` - Upload profile picture (multipart, field `file`)
 
 ---
 

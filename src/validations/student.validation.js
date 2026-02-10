@@ -66,6 +66,7 @@ const updateStudent = {
       ).optional(),
       bio: Joi.string().optional().allow('', null),
       profileImageUrl: Joi.string().optional().allow('', null),
+      profileImageKey: Joi.string().optional().allow('', null),
       status: Joi.string().valid('active', 'inactive').optional(),
     })
     .min(1),
@@ -77,4 +78,10 @@ const deleteStudent = {
   }),
 };
 
-export { getStudents, getStudent, updateStudent, deleteStudent };
+const profilePicture = {
+  params: Joi.object().keys({
+    studentId: Joi.string().required().custom(objectId),
+  }),
+};
+
+export { getStudents, getStudent, updateStudent, deleteStudent, profilePicture };
