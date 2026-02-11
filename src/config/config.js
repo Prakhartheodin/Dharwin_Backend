@@ -44,11 +44,7 @@ const config = {
   port: envVars.PORT,
   mongoose: {
     url: envVars.MONGODB_URL + (envVars.NODE_ENV === 'test' ? '-test' : ''),
-    options: {
-      useCreateIndex: true, // Optional: Remove this if using Mongoose v6+
-      useNewUrlParser: true,
-      useUnifiedTopology: true,
-    },
+    options: {},
   },
   jwt: {
     secret: envVars.JWT_SECRET,

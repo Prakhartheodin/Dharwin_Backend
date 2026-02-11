@@ -90,7 +90,7 @@ const deleteUserById = async (userId) => {
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
   }
-  await user.remove();
+  await user.deleteOne();
   // Invalidate only this user's tokens (refresh, reset, verify). Do not touch the requester's tokens.
   await Token.deleteMany({ user: userId });
   return user;

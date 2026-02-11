@@ -124,7 +124,7 @@ const deleteStudentById = async (studentId) => {
   if (!student) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Student not found');
   }
-  await student.remove();
+  await student.deleteOne();
   return student;
 };
 

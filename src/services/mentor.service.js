@@ -124,7 +124,7 @@ const deleteMentorById = async (mentorId) => {
   if (!mentor) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Mentor not found');
   }
-  await mentor.remove();
+  await mentor.deleteOne();
   return mentor;
 };
 

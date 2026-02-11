@@ -41,7 +41,7 @@ const logout = async (refreshToken) => {
   if (!refreshTokenDoc) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Not found');
   }
-  await refreshTokenDoc.remove();
+  await refreshTokenDoc.deleteOne();
 };
 
 /**
@@ -67,7 +67,7 @@ const refreshAuth = async (refreshToken, req = null) => {
     const user = await getUserById(payload.sub);
     if (!user || user.status !== 'active') throw new Error();
 
-    await refreshTokenDoc.remove();
+    await refreshTokenDoc.deleteOne();
 
     if (payload.impersonation) {
       const { impersonationId, by: adminUserId, startedAt } = payload.impersonation;

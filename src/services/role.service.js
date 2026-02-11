@@ -87,7 +87,7 @@ const deleteRoleById = async (roleId) => {
     );
   }
 
-  await role.remove();
+  await role.deleteOne();
   return role;
 };
 
