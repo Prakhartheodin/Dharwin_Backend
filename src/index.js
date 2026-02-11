@@ -4,12 +4,20 @@ import config from './config/config.js';
 import logger from './config/logger.js';
 
 let server;
-mongoose.connect(config.mongoose.url, config.mongoose.options).then(() => {
-  logger.info('Connected to MongoDB');
-  server = app.listen(config.port, () => {
-    logger.info(`Listening to port ${config.port}`);
+const port = config.port || process.env.PORT || 3000;
+
+mongoose
+  .connect(config.mongoose.url, config.mongoose.options)
+  .then(() => {
+    logger.info('Connected to MongoDB');
+    server = app.listen(port, '0.0.0.0', () => {
+      logger.info(`Listening on port ${port}`);
+    });
+  })
+  .catch((err) => {
+    logger.error('MongoDB connection failed:', err.message);
+    process.exit(1);
   });
-});
 
 const exitHandler = () => {
   if (server) {
