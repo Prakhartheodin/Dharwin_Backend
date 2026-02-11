@@ -3,6 +3,8 @@ import ApiError from '../utils/ApiError.js';
 import Mentor from '../models/mentor.model.js';
 import { createUser } from './user.service.js';
 import { getRoleByName } from './role.service.js';
+import { generatePresignedDownloadUrl } from '../config/s3.js';
+import { uploadFileToS3 } from './upload.service.js';
 
 /**
  * Register a new mentor
@@ -128,6 +130,61 @@ const deleteMentorById = async (mentorId) => {
   return mentor;
 };
 
+/**
+ * Upload and set mentor profile image
+ * @param {ObjectId} mentorId
+ * @param {Express.Multer.File} file
+ * @param {Object} currentUser
+ * @returns {Promise<Mentor>}
+ */
+const updateMentorProfileImage = async (mentorId, file, currentUser) => {
+  const mentor = await getMentorById(mentorId);
+  if (!mentor) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Mentor not found');
+  }
+
+  // Upload to S3 under dedicated folder
+  const uploadResult = await uploadFileToS3(file, currentUser.id || currentUser._id, 'mentor-profile-images');
+
+  mentor.profileImage = {
+    key: uploadResult.key,
+    url: uploadResult.url,
+    originalName: uploadResult.originalName,
+    size: uploadResult.size,
+    mimeType: uploadResult.mimeType,
+    uploadedAt: new Date(),
+  };
+
+  // Optionally keep legacy field in sync for older clients
+  mentor.profileImageUrl = uploadResult.url;
+
+  await mentor.save();
+  return mentor;
+};
+
+/**
+ * Get a fresh presigned URL for mentor profile image
+ * @param {ObjectId} mentorId
+ * @returns {Promise<{url: string, mimeType?: string}>}
+ */
+const getMentorProfileImageUrl = async (mentorId) => {
+  const mentor = await getMentorById(mentorId);
+  if (!mentor) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Mentor not found');
+  }
+
+  const image = mentor.profileImage;
+  if (!image?.key) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Profile image not found');
+  }
+
+  const url = await generatePresignedDownloadUrl(image.key, 3600);
+  return {
+    url,
+    mimeType: image.mimeType,
+  };
+};
+
 export {
   registerMentor,
   queryMentors,
@@ -135,4 +192,6 @@ export {
   getMentorByUserId,
   updateMentorById,
   deleteMentorById,
+  updateMentorProfileImage,
+  getMentorProfileImageUrl,
 };

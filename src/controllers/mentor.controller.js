@@ -47,9 +47,35 @@ const deleteMentor = catchAsync(async (req, res) => {
   res.status(httpStatus.NO_CONTENT).send();
 });
 
+const uploadProfileImage = catchAsync(async (req, res) => {
+  if (!req.file) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'No file provided');
+  }
+
+  const mentor = await mentorService.updateMentorProfileImage(req.params.mentorId, req.file, req.user);
+  res.status(httpStatus.OK).send(mentor);
+});
+
+const getProfileImage = catchAsync(async (req, res) => {
+  const data = await mentorService.getMentorProfileImageUrl(req.params.mentorId);
+
+  // If client explicitly wants JSON (e.g., for frontend), return JSON
+  if (req.headers.accept && req.headers.accept.includes('application/json')) {
+    return res.status(httpStatus.OK).send({
+      success: true,
+      data,
+    });
+  }
+
+  // Default: redirect to presigned URL for direct preview/download
+  return res.redirect(data.url);
+});
+
 export {
   getMentors,
   getMentor,
   updateMentor,
   deleteMentor,
+  uploadProfileImage,
+  getProfileImage,
 };

@@ -67,7 +67,16 @@ const mentorSchema = mongoose.Schema(
       type: [String],
       default: [],
     },
-    // Profile Image
+    // Profile Image (new structured field)
+    profileImage: {
+      key: { type: String, trim: true },
+      url: { type: String, trim: true },
+      originalName: { type: String, trim: true },
+      size: { type: Number },
+      mimeType: { type: String, trim: true },
+      uploadedAt: { type: Date },
+    },
+    // Legacy profile image URL (kept for backward compatibility)
     profileImageUrl: {
       type: String,
       default: null,
