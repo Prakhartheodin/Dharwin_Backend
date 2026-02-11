@@ -65,6 +65,14 @@ if (config.env === 'production') {
   app.use('/v1/auth', authLimiter);
 }
 
+// health / root (for Render health checks and visiting the URL)
+app.get('/', (req, res) => {
+  res.status(httpStatus.OK).json({ status: 'ok', message: 'UAT Dharwin Backend API', docs: '/v1/docs' });
+});
+app.get('/health', (req, res) => {
+  res.status(httpStatus.OK).json({ status: 'ok' });
+});
+
 // v1 api routes
 app.use('/v1', routes);
 
