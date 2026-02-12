@@ -54,7 +54,7 @@ const createTrainingModule = async (moduleBody, currentUser) => {
       // Handle content-specific fields
       switch (item.contentType) {
         case 'upload-video':
-          if (item.videoFile) {
+          if (item.videoFile?.buffer && item.videoFile?.originalname) {
             const videoUpload = await uploadFileToS3(
               item.videoFile,
               currentUser.id || currentUser._id,
@@ -68,6 +68,16 @@ const createTrainingModule = async (moduleBody, currentUser) => {
               mimeType: videoUpload.mimeType,
               uploadedAt: new Date(),
             };
+          } else if (item.videoFile?.key) {
+            // Keep already uploaded file metadata from client payload
+            processedItem.videoFile = {
+              key: item.videoFile.key,
+              url: item.videoFile.url,
+              originalName: item.videoFile.originalName,
+              size: item.videoFile.size,
+              mimeType: item.videoFile.mimeType,
+              uploadedAt: item.videoFile.uploadedAt || new Date(),
+            };
           }
           break;
 
@@ -76,7 +86,7 @@ const createTrainingModule = async (moduleBody, currentUser) => {
           break;
 
         case 'pdf-document':
-          if (item.pdfFile) {
+          if (item.pdfFile?.buffer && item.pdfFile?.originalname) {
             const pdfUpload = await uploadFileToS3(
               item.pdfFile,
               currentUser.id || currentUser._id,
@@ -89,6 +99,16 @@ const createTrainingModule = async (moduleBody, currentUser) => {
               size: pdfUpload.size,
               mimeType: pdfUpload.mimeType,
               uploadedAt: new Date(),
+            };
+          } else if (item.pdfDocument?.key) {
+            // Keep already uploaded file metadata from client payload
+            processedItem.pdfDocument = {
+              key: item.pdfDocument.key,
+              url: item.pdfDocument.url,
+              originalName: item.pdfDocument.originalName,
+              size: item.pdfDocument.size,
+              mimeType: item.pdfDocument.mimeType,
+              uploadedAt: item.pdfDocument.uploadedAt || new Date(),
             };
           }
           break;
@@ -284,7 +304,7 @@ const updateTrainingModuleById = async (moduleId, updateBody, currentUser) => {
       // Handle content-specific fields
       switch (item.contentType) {
         case 'upload-video':
-          if (item.videoFile) {
+          if (item.videoFile?.buffer && item.videoFile?.originalname) {
             const videoUpload = await uploadFileToS3(
               item.videoFile,
               currentUser.id || currentUser._id,
@@ -298,10 +318,20 @@ const updateTrainingModuleById = async (moduleId, updateBody, currentUser) => {
               mimeType: videoUpload.mimeType,
               uploadedAt: new Date(),
             };
-          } else if (item.videoFileId) {
-            // Keep existing video if no new file uploaded
-            const existingItem = module.playlist.find((p) => p._id.toString() === item.videoFileId);
-            if (existingItem?.videoFile) {
+          } else if (item.videoFile?.key) {
+            // Keep already uploaded file metadata sent by frontend
+            processedItem.videoFile = {
+              key: item.videoFile.key,
+              url: item.videoFile.url,
+              originalName: item.videoFile.originalName,
+              size: item.videoFile.size,
+              mimeType: item.videoFile.mimeType,
+              uploadedAt: item.videoFile.uploadedAt || new Date(),
+            };
+          } else if (item._id) {
+            // Keep existing video if no new upload provided
+            const existingItem = module.playlist.find((p) => p._id.toString() === String(item._id));
+            if (existingItem?.videoFile?.key) {
               processedItem.videoFile = existingItem.videoFile;
             }
           }
@@ -312,7 +342,7 @@ const updateTrainingModuleById = async (moduleId, updateBody, currentUser) => {
           break;
 
         case 'pdf-document':
-          if (item.pdfFile) {
+          if (item.pdfFile?.buffer && item.pdfFile?.originalname) {
             const pdfUpload = await uploadFileToS3(
               item.pdfFile,
               currentUser.id || currentUser._id,
@@ -326,10 +356,20 @@ const updateTrainingModuleById = async (moduleId, updateBody, currentUser) => {
               mimeType: pdfUpload.mimeType,
               uploadedAt: new Date(),
             };
-          } else if (item.pdfFileId) {
-            // Keep existing PDF if no new file uploaded
-            const existingItem = module.playlist.find((p) => p._id.toString() === item.pdfFileId);
-            if (existingItem?.pdfDocument) {
+          } else if (item.pdfDocument?.key) {
+            // Keep already uploaded file metadata sent by frontend
+            processedItem.pdfDocument = {
+              key: item.pdfDocument.key,
+              url: item.pdfDocument.url,
+              originalName: item.pdfDocument.originalName,
+              size: item.pdfDocument.size,
+              mimeType: item.pdfDocument.mimeType,
+              uploadedAt: item.pdfDocument.uploadedAt || new Date(),
+            };
+          } else if (item._id) {
+            // Keep existing PDF if no new upload provided
+            const existingItem = module.playlist.find((p) => p._id.toString() === String(item._id));
+            if (existingItem?.pdfDocument?.key) {
               processedItem.pdfDocument = existingItem.pdfDocument;
             }
           }
@@ -365,6 +405,8 @@ const updateTrainingModuleById = async (moduleId, updateBody, currentUser) => {
       processedPlaylist.push(processedItem);
     }
     module.playlist = processedPlaylist;
+    // Prevent raw payload from overwriting normalized/merged playlist below
+    updateBody.playlist = processedPlaylist;
   }
 
   // Update other fields

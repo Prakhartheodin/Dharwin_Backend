@@ -2,6 +2,36 @@ import mongoose from 'mongoose';
 import toJSON from './plugins/toJSON.plugin.js';
 import paginate from './plugins/paginate.plugin.js';
 
+const inlineQuizSchema = new mongoose.Schema(
+  {
+    questions: [
+      {
+        questionText: {
+          type: String,
+          trim: true,
+        },
+        allowMultipleAnswers: {
+          type: Boolean,
+          default: false,
+        },
+        options: [
+          {
+            text: {
+              type: String,
+              trim: true,
+            },
+            isCorrect: {
+              type: Boolean,
+              default: false,
+            },
+          },
+        ],
+      },
+    ],
+  },
+  { _id: false }
+);
+
 const trainingModuleSchema = mongoose.Schema(
   {
     // Course Info fields
@@ -89,30 +119,8 @@ const trainingModuleSchema = mongoose.Schema(
         },
         // For quiz - stored inline in training module (single schema approach)
         quiz: {
-          questions: [
-            {
-              questionText: {
-                type: String,
-                trim: true,
-              },
-              allowMultipleAnswers: {
-                type: Boolean,
-                default: false,
-              },
-              options: [
-                {
-                  text: {
-                    type: String,
-                    trim: true,
-                  },
-                  isCorrect: {
-                    type: Boolean,
-                    default: false,
-                  },
-                },
-              ],
-            },
-          ],
+          type: inlineQuizSchema,
+          default: undefined,
         },
         // For test
         testLinkOrReference: {

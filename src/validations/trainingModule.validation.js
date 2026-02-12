@@ -1,6 +1,15 @@
 import Joi from 'joi';
 import { objectId } from './custom.validation.js';
 
+const uploadedFileSchema = Joi.object({
+  key: Joi.string().trim().required(),
+  url: Joi.string().trim().required(),
+  originalName: Joi.string().trim().optional(),
+  size: Joi.number().optional(),
+  mimeType: Joi.string().trim().optional(),
+  uploadedAt: Joi.alternatives().try(Joi.date(), Joi.string()).optional(),
+});
+
 const playlistItemSchema = Joi.object({
   _id: Joi.string().custom(objectId).optional(),
   contentType: Joi.string()
@@ -10,6 +19,8 @@ const playlistItemSchema = Joi.object({
   duration: Joi.number().integer().min(0).default(0),
   order: Joi.number().integer().min(0).optional(),
   // Content-specific fields
+  videoFile: uploadedFileSchema.optional(),
+  pdfDocument: uploadedFileSchema.optional(),
   youtubeUrl: Joi.string().uri().when('contentType', {
     is: 'youtube-link',
     then: Joi.required(),
