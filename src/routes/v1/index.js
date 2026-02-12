@@ -8,6 +8,7 @@ import categoryRoute from './category.route.js';
 import studentRoute from './student.route.js';
 import mentorRoute from './mentor.route.js';
 import uploadRoute from './upload.route.js';
+import trainingModuleRoute from './trainingModule.route.js';
 import docsRoute from './docs.route.js';
 import config from '../../config/config.js';
 
@@ -45,6 +46,10 @@ const defaultRoutes = [
   {
     path: '/training/mentors',
     route: mentorRoute,
+  },
+  {
+    path: '/training/modules',
+    route: trainingModuleRoute,
   },
   {
     path: '/upload',
