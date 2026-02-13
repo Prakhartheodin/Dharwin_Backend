@@ -47,6 +47,9 @@
     "prettier"
   ],
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.744.0",
+    "@aws-sdk/s3-request-presigner": "^3.744.0",
+    "@google/generative-ai": "^0.24.1",
     "bcryptjs": "^2.4.3",
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.7",
@@ -63,6 +66,7 @@
     "moment": "^2.24.0",
     "mongoose": "^8.0.0",
     "morgan": "^1.9.1",
+    "multer": "^1.4.5-lts.1",
     "nodemailer": "^6.3.1",
     "passport": "^0.4.0",
     "passport-jwt": "^4.0.0",
@@ -71,10 +75,7 @@
     "swagger-ui-express": "^4.1.6",
     "validator": "^13.0.0",
     "winston": "^3.2.1",
-    "xss-clean": "^0.1.4",
-    "@aws-sdk/client-s3": "^3.744.0",
-    "@aws-sdk/s3-request-presigner": "^3.744.0",
-    "multer": "^1.4.5-lts.1"
+    "xss-clean": "^0.1.4"
   },
   "devDependencies": {
     "@types/dotenv": "^6.1.1",

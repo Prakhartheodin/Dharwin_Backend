@@ -11,6 +11,7 @@ import uploadRoute from './upload.route.js';
 import trainingModuleRoute from './trainingModule.route.js';
 import docsRoute from './docs.route.js';
 import config from '../../config/config.js';
+import blogRoute from './blog.route.js';
 
 const router = express.Router();
 
@@ -54,6 +55,10 @@ const defaultRoutes = [
   {
     path: '/upload',
     route: uploadRoute,
+  },
+  {
+    path: '/blog',
+    route: blogRoute,
   },
 ];
 

@@ -34,6 +34,9 @@ const envVarsSchema = Joi.object()
     // CORS / Frontend
     CORS_ORIGIN: Joi.string().optional().description('Allowed CORS origin (comma-separated for multiple origins)'),
     FRONTEND_BASE_URL: Joi.string().optional().description('Frontend base URL for email links'),
+
+    // Gemini (blog AI)
+    GEMINI_API_KEY: Joi.string().optional().description('Google Gemini API key for blog generation'),
   })
   .unknown();
 
@@ -71,6 +74,9 @@ const config = {
   },
   corsOrigin: envVars.CORS_ORIGIN ? envVars.CORS_ORIGIN.split(',').map((o) => o.trim()) : true,
   frontendBaseUrl: envVars.FRONTEND_BASE_URL || 'http://localhost:3001',
+  gemini: {
+    apiKey: envVars.GEMINI_API_KEY || '',
+  },
   aws: {
     accessKeyId: envVars.AWS_ACCESS_KEY_ID,
     secretAccessKey: envVars.AWS_SECRET_ACCESS_KEY,
