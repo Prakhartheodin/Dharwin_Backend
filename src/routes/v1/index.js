@@ -14,6 +14,12 @@ import studentQuizRoute from './studentQuiz.route.js';
 import certificateRoute from './certificate.route.js';
 import evaluationRoute from './evaluation.route.js';
 import analyticsRoute from './analytics.route.js';
+import attendanceRoute from './attendance.route.js';
+import holidayRoute from './holiday.route.js';
+import studentGroupRoute from './studentGroup.route.js';
+import shiftRoute from './shift.route.js';
+import leaveRequestRoute from './leaveRequest.route.js';
+import backdatedAttendanceRequestRoute from './backdatedAttendanceRequest.route.js';
 import docsRoute from './docs.route.js';
 import config from '../../config/config.js';
 import blogRoute from './blog.route.js';
@@ -64,6 +70,30 @@ const defaultRoutes = [
   {
     path: '/training/analytics',
     route: analyticsRoute,
+  },
+  {
+    path: '/training/attendance',
+    route: attendanceRoute,
+  },
+  {
+    path: '/holidays',
+    route: holidayRoute,
+  },
+  {
+    path: '/student-groups',
+    route: studentGroupRoute,
+  },
+  {
+    path: '/shifts',
+    route: shiftRoute,
+  },
+  {
+    path: '/leave-requests',
+    route: leaveRequestRoute,
+  },
+  {
+    path: '/backdated-attendance-requests',
+    route: backdatedAttendanceRequestRoute,
   },
   {
     path: '/training/students',

@@ -30,6 +30,11 @@ export const ActivityActions = {
   STUDENT_COURSE_COMPLETE: 'student.course.complete',
   STUDENT_QUIZ_ATTEMPT: 'student.quiz.attempt',
   CERTIFICATE_ISSUED: 'certificate.issued',
+  // Attendance
+  ATTENDANCE_PUNCH_IN: 'attendance.punchIn',
+  ATTENDANCE_PUNCH_OUT: 'attendance.punchOut',
+  ATTENDANCE_PUNCH_OUT_BY_ADMIN: 'attendance.punchOutByAdmin',
+  ATTENDANCE_AUTO_PUNCH_OUT: 'attendance.autoPunchOut',
 };
 
 export const EntityTypes = {
@@ -42,4 +47,5 @@ export const EntityTypes = {
   STUDENT_COURSE_PROGRESS: 'StudentCourseProgress',
   STUDENT_QUIZ_ATTEMPT: 'StudentQuizAttempt',
   CERTIFICATE: 'Certificate',
+  ATTENDANCE: 'Attendance',
 };

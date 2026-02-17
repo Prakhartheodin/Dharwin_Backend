@@ -83,4 +83,66 @@ const createStudentFromUser = {
   }),
 };
 
-export { getStudents, getStudent, updateStudent, deleteStudent, createStudentFromUser };
+const VALID_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const updateWeekOff = {
+  body: Joi.object().keys({
+    studentIds: Joi.array().items(Joi.string().custom(objectId)).min(1).required().messages({
+      'array.min': 'At least one student ID is required',
+      'any.required': 'Student IDs are required',
+    }),
+    weekOff: Joi.array()
+      .items(Joi.string().valid(...VALID_DAYS))
+      .unique()
+      .required()
+      .messages({
+        'any.required': 'Week-off days are required',
+        'array.unique': 'Week-off days must be unique',
+      }),
+  }),
+};
+
+const importWeekOff = {
+  body: Joi.object()
+    .keys({
+      entries: Joi.array()
+        .items(
+          Joi.object()
+            .keys({
+              email: Joi.string().email().required().messages({ 'any.required': 'Email is required' }),
+              weekOff: Joi.array()
+                .items(Joi.string().valid(...VALID_DAYS))
+                .unique()
+                .optional()
+                .default([]),
+              notes: Joi.string().optional().allow('', null),
+            })
+            .required()
+        )
+        .min(1)
+        .max(1000)
+        .required()
+        .messages({ 'array.min': 'At least one entry is required' }),
+    })
+    .required(),
+};
+
+const getWeekOff = {
+  params: Joi.object().keys({
+    studentId: Joi.string().custom(objectId).required(),
+  }),
+};
+
+const assignShift = {
+  body: Joi.object().keys({
+    studentIds: Joi.array().items(Joi.string().custom(objectId)).min(1).required().messages({
+      'array.min': 'At least one student ID is required',
+      'any.required': 'Student IDs are required',
+    }),
+    shiftId: Joi.string().custom(objectId).required().messages({
+      'any.required': 'Shift ID is required',
+    }),
+  }),
+};
+
+export { getStudents, getStudent, updateStudent, deleteStudent, createStudentFromUser, updateWeekOff, importWeekOff, getWeekOff, assignShift };

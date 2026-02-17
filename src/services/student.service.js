@@ -6,6 +6,7 @@ import { generatePresignedDownloadUrl } from '../config/s3.js';
 import { uploadFileToS3 } from './upload.service.js';
 import { createUser } from './user.service.js';
 import { getRoleByName } from './role.service.js';
+import { getShiftById } from './shift.service.js';
 
 /**
  * Register a new student
@@ -89,7 +90,9 @@ const queryStudents = async (filter, options) => {
  * @returns {Promise<Student>}
  */
 const getStudentById = async (id) => {
-  return Student.findById(id).populate('user', 'name email role roleIds status isEmailVerified');
+  return Student.findById(id)
+    .populate('user', 'name email role roleIds status isEmailVerified')
+    .populate('shift', 'name description timezone startTime endTime isActive');
 };
 
 /**
@@ -257,6 +260,168 @@ const getUsersWithStudentRoleWithoutProfile = async () => {
     .map((u) => ({ id: u._id.toString(), name: u.name, email: u.email }));
 };
 
+/**
+ * Update week-off days for multiple students
+ * @param {Array<string>} studentIds - Array of student IDs
+ * @param {Array<string>} weekOff - Array of week-off days (e.g. ['Saturday', 'Sunday'])
+ * @param {Object} user - Current user (for permission check)
+ * @returns {Promise<Object>}
+ */
+const updateWeekOffForStudents = async (studentIds, weekOff, user) => {
+  if (!user) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Authentication required');
+  }
+
+  const students = await Student.find({ _id: { $in: studentIds } });
+  if (students.length !== studentIds.length) {
+    const foundIds = students.map((s) => String(s._id));
+    const missingIds = studentIds.filter((id) => !foundIds.includes(String(id)));
+    throw new ApiError(httpStatus.NOT_FOUND, `Some students not found: ${missingIds.join(', ')}`);
+  }
+
+  const weekOffToPersist = Array.isArray(weekOff) ? [...weekOff] : [];
+  const updateResult = await Student.updateMany(
+    { _id: { $in: studentIds } },
+    { $set: { weekOff: weekOffToPersist } }
+  );
+
+  const updatedStudents = await Student.find({ _id: { $in: studentIds } }).populate('user', 'name email');
+  return {
+    success: true,
+    message: `Week-off updated for ${updateResult.modifiedCount} student(s)`,
+    data: {
+      updatedCount: updateResult.modifiedCount,
+      weekOff: weekOffToPersist,
+      students: updatedStudents,
+    },
+  };
+};
+
+const VALID_WEEK_OFF_DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+/**
+ * Bulk import week-off by candidate email (e.g. from Excel).
+ * @param {Array<{ email: string, weekOff: string[] }>} entries
+ * @param {Object} user - Current user (for permission)
+ * @returns {Promise<{ success, message, data: { updatedCount, skipped } }>}
+ */
+const importWeekOffByEmail = async (entries, user) => {
+  if (!user) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Authentication required');
+  }
+  if (!Array.isArray(entries) || entries.length === 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'At least one entry is required (email and weekOff)');
+  }
+
+  const skipped = [];
+  let updatedCount = 0;
+  const emails = [...new Set(entries.map((e) => String(e?.email ?? '').trim().toLowerCase()).filter(Boolean))];
+  if (emails.length === 0) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'No valid emails in entries');
+  }
+
+  const users = await User.find({ email: { $in: emails } }).select('_id email').lean();
+  const emailToUserId = new Map(users.map((u) => [String(u.email).toLowerCase(), u._id.toString()]));
+  const students = await Student.find({ user: { $in: users.map((u) => u._id) } }).select('user weekOff').lean();
+  const userIdToStudent = new Map(students.map((s) => [s.user?.toString?.() ?? s.user, s]));
+
+  for (const entry of entries) {
+    const email = String(entry?.email ?? '').trim();
+    if (!email) {
+      skipped.push({ email: entry?.email ?? '', reason: 'Empty email' });
+      continue;
+    }
+    const normalized = email.toLowerCase();
+    const userId = emailToUserId.get(normalized);
+    if (!userId) {
+      skipped.push({ email, reason: 'No user found with this email' });
+      continue;
+    }
+    const student = userIdToStudent.get(userId);
+    if (!student) {
+      skipped.push({ email, reason: 'User has no student profile' });
+      continue;
+    }
+    let weekOff = Array.isArray(entry.weekOff) ? entry.weekOff : [];
+    weekOff = weekOff
+      .map((d) => String(d).trim())
+      .filter((d) => VALID_WEEK_OFF_DAYS.includes(d));
+    weekOff = [...new Set(weekOff)];
+
+    await Student.updateOne({ _id: student._id }, { $set: { weekOff } });
+    updatedCount += 1;
+  }
+
+  return {
+    success: true,
+    message: `Week-off updated for ${updatedCount} candidate(s)${skipped.length ? `; ${skipped.length} skipped` : ''}`,
+    data: { updatedCount, skipped },
+  };
+};
+
+/**
+ * Get week-off days for a student
+ * @param {string} studentId - Student ID
+ * @returns {Promise<Object>}
+ */
+const getStudentWeekOff = async (studentId) => {
+  const student = await Student.findById(studentId).select('weekOff').populate('user', 'name email');
+  if (!student) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Student not found');
+  }
+  const user = student.user || {};
+  return {
+    studentId: student._id,
+    studentName: user.name || 'Unknown',
+    studentEmail: user.email || '',
+    weekOff: student.weekOff || [],
+  };
+};
+
+/**
+ * Assign shift to multiple students
+ * @param {Array<string>} studentIds
+ * @param {string} shiftId
+ * @param {Object} user
+ */
+const assignShiftToStudents = async (studentIds, shiftId, user) => {
+  const shift = await getShiftById(shiftId);
+
+  const students = await Student.find({ _id: { $in: studentIds } });
+  if (students.length !== studentIds.length) {
+    const foundIds = students.map((s) => String(s._id));
+    const missingIds = studentIds.filter((id) => !foundIds.includes(String(id)));
+    throw new ApiError(httpStatus.NOT_FOUND, `Some students not found: ${missingIds.join(', ')}`);
+  }
+
+  const updateResult = await Student.updateMany(
+    { _id: { $in: studentIds } },
+    { $set: { shift: shiftId } }
+  );
+
+  const updatedStudents = await Student.find({ _id: { $in: studentIds } })
+    .populate('user', 'name email')
+    .populate('shift', 'name description timezone startTime endTime isActive');
+
+  return {
+    success: true,
+    message: `Shift assigned to ${updateResult.modifiedCount} student(s)`,
+    data: {
+      updatedCount: updateResult.modifiedCount,
+      shift: {
+        id: shift._id,
+        name: shift.name,
+        description: shift.description,
+        timezone: shift.timezone,
+        startTime: shift.startTime,
+        endTime: shift.endTime,
+        isActive: shift.isActive,
+      },
+      students: updatedStudents,
+    },
+  };
+};
+
 export {
   registerStudent,
   queryStudents,
@@ -268,4 +433,8 @@ export {
   getStudentProfileImageUrl,
   createStudentFromUser,
   getUsersWithStudentRoleWithoutProfile,
+  updateWeekOffForStudents,
+  importWeekOffByEmail,
+  getStudentWeekOff,
+  assignShiftToStudents,
 };

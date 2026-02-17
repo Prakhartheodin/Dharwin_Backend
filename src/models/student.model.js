@@ -94,6 +94,24 @@ const studentSchema = mongoose.Schema(
       enum: ['active', 'inactive'],
       default: 'active',
     },
+    // Week-off days for attendance (e.g. ['Saturday', 'Sunday'])
+    weekOff: {
+      type: [String],
+      enum: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+      default: [],
+    },
+    // Assigned holidays (ObjectIds ref Holiday)
+    holidays: {
+      type: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Holiday' }],
+      default: [],
+    },
+    // Assigned shift (ref Shift)
+    shift: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Shift',
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,

@@ -101,6 +101,41 @@ const getUsersWithoutStudentProfile = catchAsync(async (req, res) => {
   res.send({ results: users });
 });
 
+/**
+ * Update week-off calendar for multiple students (admin/manage only)
+ */
+const updateWeekOff = catchAsync(async (req, res) => {
+  const { studentIds, weekOff } = req.body;
+  const result = await studentService.updateWeekOffForStudents(studentIds, weekOff, req.user);
+  res.status(httpStatus.OK).send(result);
+});
+
+/**
+ * Bulk import week-off by candidate email (e.g. from Excel)
+ */
+const importWeekOff = catchAsync(async (req, res) => {
+  const { entries } = req.body;
+  const result = await studentService.importWeekOffByEmail(entries, req.user);
+  res.status(httpStatus.OK).send(result);
+});
+
+/**
+ * Get week-off days for a student
+ */
+const getWeekOff = catchAsync(async (req, res) => {
+  const result = await studentService.getStudentWeekOff(req.params.studentId);
+  res.send(result);
+});
+
+/**
+ * Assign shift to multiple students
+ */
+const assignShift = catchAsync(async (req, res) => {
+  const { studentIds, shiftId } = req.body;
+  const result = await studentService.assignShiftToStudents(studentIds, shiftId, req.user);
+  res.status(httpStatus.OK).send(result);
+});
+
 export {
   getStudents,
   getStudent,
@@ -111,4 +146,8 @@ export {
   getProfileImage,
   createStudentFromUser,
   getUsersWithoutStudentProfile,
+  updateWeekOff,
+  importWeekOff,
+  getWeekOff,
+  assignShift,
 };

@@ -6,6 +6,10 @@ import ActivityLog from './activityLog.model.js';
 import Category from './category.model.js';
 import Student from './student.model.js';
 import Mentor from './mentor.model.js';
+import Attendance from './attendance.model.js';
+import Holiday from './holiday.model.js';
+import StudentGroup from './studentGroup.model.js';
+import Shift from './shift.model.js';
 
-export { Token, User, Role, Impersonation, ActivityLog, Category, Student, Mentor };
+export { Token, User, Role, Impersonation, ActivityLog, Category, Student, Mentor, Attendance, Holiday, StudentGroup, Shift };
 
