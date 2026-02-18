@@ -70,3 +70,5 @@ const queryActivityLogs = async (filter, options) => {
 };
 
 export { createActivityLog, queryActivityLogs };
+
+
