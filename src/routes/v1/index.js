@@ -24,6 +24,7 @@ import candidateRoute from './candidate.route.js';
 import docsRoute from './docs.route.js';
 import config from '../../config/config.js';
 import blogRoute from './blog.route.js';
+import livekitRoute from './livekit.route.js';
 
 const router = express.Router();
 
@@ -119,6 +120,10 @@ const defaultRoutes = [
   {
     path: '/blog',
     route: blogRoute,
+  },
+  {
+    path: '/livekit',
+    route: livekitRoute,
   },
 ];
 

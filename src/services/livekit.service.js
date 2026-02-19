@@ -1,0 +1,280 @@
+import {
+  AccessToken,
+  EgressClient,
+  RoomServiceClient,
+  EncodedFileOutput,
+  EncodedFileType,
+  S3Upload,
+  EgressStatus,
+} from 'livekit-server-sdk';
+import config from '../config/config.js';
+import ApiError from '../utils/ApiError.js';
+import httpStatus from 'http-status';
+
+// Initialize LiveKit clients
+// Convert ws:// to http:// for SDK clients (they use HTTP, not WebSocket)
+const livekitUrl = config.livekit?.url?.replace(/^ws/, 'http') || 'http://localhost:7880';
+const apiKey = config.livekit?.apiKey;
+const apiSecret = config.livekit?.apiSecret;
+
+// Debug logging (remove in production)
+if (!apiKey || !apiSecret) {
+  console.warn('LiveKit credentials not configured:', {
+    hasApiKey: !!apiKey,
+    hasApiSecret: !!apiSecret,
+    livekitConfig: config.livekit,
+  });
+}
+
+let egressClient = null;
+let roomService = null;
+
+if (apiKey && apiSecret) {
+  try {
+    egressClient = new EgressClient(livekitUrl, apiKey, apiSecret);
+    roomService = new RoomServiceClient(livekitUrl, apiKey, apiSecret);
+    console.log('LiveKit clients initialized successfully');
+  } catch (error) {
+    console.warn('Failed to initialize LiveKit clients:', error);
+  }
+}
+
+/**
+ * Generate LiveKit access token for a participant
+ * @param {Object} options - Token generation options
+ * @param {string} options.roomName - Room name
+ * @param {string} options.participantName - Display name
+ * @param {string} options.participantIdentity - Unique identity (usually user ID)
+ * @returns {Promise<string>} JWT token
+ */
+const generateAccessToken = async ({ roomName, participantName, participantIdentity }) => {
+  if (!apiKey || !apiSecret) {
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'LiveKit credentials not configured');
+  }
+
+  if (!roomName || !participantName) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'roomName and participantName are required');
+  }
+
+  const token = new AccessToken(apiKey, apiSecret, {
+    identity: participantIdentity || participantName,
+    name: participantName,
+  });
+
+  // Grant permissions
+  token.addGrant({
+    room: roomName,
+    roomJoin: true,
+    canPublish: true,
+    canSubscribe: true,
+    canPublishData: true,
+    canUpdateOwnMetadata: true,
+  });
+
+  return await token.toJwt();
+};
+
+/**
+ * Start room composite recording (egress)
+ * @param {string} roomName - Room name to record
+ * @returns {Promise<Object>} Egress info with egressId
+ */
+const startRecording = async (roomName) => {
+  if (!egressClient) {
+    throw new ApiError(
+      httpStatus.SERVICE_UNAVAILABLE,
+      'Recording service not available. Please configure LiveKit Egress.'
+    );
+  }
+
+  if (!roomService) {
+    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Room service not available');
+  }
+
+  // Verify room exists and has participants
+  try {
+    const rooms = await roomService.listRooms([roomName]);
+    if (rooms.length === 0) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Room not found');
+    }
+  } catch (error) {
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Failed to verify room: ${error.message}`);
+  }
+
+  // Determine if using local MinIO or production S3
+  const isLocalDev =
+    config.env !== 'production' || !config.aws?.accessKeyId || !config.aws?.secretAccessKey;
+
+  const s3Config = isLocalDev
+    ? {
+        // Local MinIO configuration
+        accessKey: config.livekit?.minio?.accessKey || 'minioadmin',
+        secret: config.livekit?.minio?.secretKey || 'minioadmin123',
+        region: 'us-east-1',
+        bucket: config.livekit?.minio?.bucket || 'recordings',
+        endpoint: config.livekit?.minio?.endpoint || 'http://minio:9000', // Docker service name
+        forcePathStyle: true, // Required for MinIO
+      }
+    : {
+        // Production S3 configuration
+        accessKey: config.aws.accessKeyId,
+        secret: config.aws.secretAccessKey,
+        region: config.aws.region || 'us-east-1',
+        bucket: config.livekit?.s3Bucket || config.aws.bucketName || 'recordings',
+      };
+
+  const fileOutput = new EncodedFileOutput({
+    filepath: `${roomName}-${Date.now()}.mp4`,
+    output: {
+      case: 's3',
+      value: new S3Upload(s3Config),
+    },
+    fileType: EncodedFileType.MP4,
+  });
+
+  try {
+    const egressInfo = await egressClient.startRoomCompositeEgress(roomName, fileOutput, {
+      layout: 'grid',
+      audioOnly: false,
+      videoOnly: false,
+    });
+
+    return {
+      egressId: egressInfo.egressId,
+      roomName,
+      status: egressInfo.status,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    // Provide helpful error messages
+    if (errorMessage.includes('no response from servers') || errorMessage.includes('connection refused')) {
+      throw new ApiError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        'LiveKit Egress service is not running. Please start the Egress service using docker-compose up -d'
+      );
+    } else if (errorMessage.includes('EGRESS_NOT_CONNECTED')) {
+      throw new ApiError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        'Egress service is not connected to LiveKit server. Please check Egress configuration.'
+      );
+    } else if (errorMessage.includes('ws_url')) {
+      throw new ApiError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        'Egress service configuration error: ws_url is missing or invalid. Check Egress config file.'
+      );
+    }
+
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      `Failed to start recording: ${errorMessage}`
+    );
+  }
+};
+
+/**
+ * Stop recording (egress)
+ * @param {string} egressId - Egress ID to stop
+ * @returns {Promise<Object>} Updated egress info
+ */
+const stopRecording = async (egressId) => {
+  if (!egressClient) {
+    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Recording service not available');
+  }
+
+  if (!egressId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'egressId is required');
+  }
+
+  try {
+    const egressInfo = await egressClient.stopEgress(egressId);
+    return {
+      egressId,
+      status: egressInfo.status,
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    if (errorMessage.includes('no response from servers') || errorMessage.includes('connection refused')) {
+      throw new ApiError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        'LiveKit Egress service is not running. Please start the Egress service.'
+      );
+    }
+
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Failed to stop recording: ${errorMessage}`);
+  }
+};
+
+/**
+ * Get recording status for a room
+ * @param {string} roomName - Room name
+ * @returns {Promise<Object>} Recording status and list
+ */
+const getRecordingStatus = async (roomName) => {
+  if (!egressClient) {
+    throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Recording service not available');
+  }
+
+  try {
+    const egressList = await egressClient.listEgress({
+      roomName: roomName,
+    });
+
+    const activeRecordings = egressList.filter(
+      (egress) => egress.status === EgressStatus.EGRESS_ACTIVE
+    );
+
+    // Helper function to serialize BigInt and Date for JSON
+    const serializeBigInt = (value) => {
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      if (value instanceof Date) {
+        return value.toISOString();
+      }
+      if (Array.isArray(value)) {
+        return value.map(serializeBigInt);
+      }
+      if (value && typeof value === 'object') {
+        const serialized = {};
+        for (const [key, val] of Object.entries(value)) {
+          serialized[key] = serializeBigInt(val);
+        }
+        return serialized;
+      }
+      return value;
+    };
+
+    return {
+      isRecording: activeRecordings.length > 0,
+      recordings: activeRecordings.map((egress) =>
+        serializeBigInt({
+          egressId: egress.egressId,
+          roomName: egress.roomName,
+          status: egress.status,
+          startedAt: egress.startedAt,
+        })
+      ),
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+    if (errorMessage.includes('no response from servers') || errorMessage.includes('connection refused')) {
+      throw new ApiError(
+        httpStatus.SERVICE_UNAVAILABLE,
+        'LiveKit Egress service is not running. Please start the Egress service.'
+      );
+    }
+
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      `Failed to get recording status: ${errorMessage}`
+    );
+  }
+};
+
+export { generateAccessToken, startRecording, stopRecording, getRecordingStatus };

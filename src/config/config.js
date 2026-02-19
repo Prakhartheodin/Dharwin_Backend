@@ -38,6 +38,16 @@ const envVarsSchema = Joi.object()
 
     // OpenAI (blog AI)
     OPENAI_API_KEY: Joi.string().optional().description('OpenAI API key for blog generation'),
+
+    // LiveKit
+    LIVEKIT_URL: Joi.string().optional().default('ws://localhost:7880').description('LiveKit server URL'),
+    LIVEKIT_API_KEY: Joi.string().optional().description('LiveKit API key'),
+    LIVEKIT_API_SECRET: Joi.string().optional().description('LiveKit API secret'),
+    MINIO_ENDPOINT: Joi.string().optional().default('http://minio:9000').description('MinIO endpoint for local recordings'),
+    MINIO_ACCESS_KEY: Joi.string().optional().default('minioadmin').description('MinIO access key'),
+    MINIO_SECRET_KEY: Joi.string().optional().default('minioadmin123').description('MinIO secret key'),
+    MINIO_BUCKET: Joi.string().optional().default('recordings').description('MinIO bucket for recordings'),
+    LIVEKIT_S3_BUCKET: Joi.string().optional().description('S3 bucket for recordings (production)'),
   })
   .unknown();
 
@@ -84,6 +94,18 @@ const config = {
     secretAccessKey: envVars.AWS_SECRET_ACCESS_KEY,
     region: envVars.AWS_REGION,
     bucketName: envVars.AWS_S3_BUCKET_NAME,
+  },
+  livekit: {
+    url: envVars.LIVEKIT_URL || 'ws://localhost:7880',
+    apiKey: envVars.LIVEKIT_API_KEY,
+    apiSecret: envVars.LIVEKIT_API_SECRET,
+    minio: {
+      endpoint: envVars.MINIO_ENDPOINT || 'http://minio:9000',
+      accessKey: envVars.MINIO_ACCESS_KEY || 'minioadmin',
+      secretKey: envVars.MINIO_SECRET_KEY || 'minioadmin123',
+      bucket: envVars.MINIO_BUCKET || 'recordings',
+    },
+    s3Bucket: envVars.LIVEKIT_S3_BUCKET,
   },
 };
 

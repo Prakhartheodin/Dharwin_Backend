@@ -34,6 +34,8 @@ export const permissionAliases = {
   // ATS candidates: ats.candidates:view -> candidates.read, ats.candidates:create,edit,delete -> candidates.manage
   'candidates.read': ['candidates.read', 'ats.candidates:view', 'ats.candidates:view,create,edit,delete'],
   'candidates.manage': ['candidates.manage', 'ats.candidates:view,create,edit,delete'],
+  // LiveKit meetings: allow mentors and admins to record meetings
+  'meetings.record': ['meetings.record', 'meetings:record', 'mentors.manage', 'training.manage'],
 };
 
 /**
