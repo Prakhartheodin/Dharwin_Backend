@@ -28,4 +28,37 @@ router.post('/register-candidate', validate(authValidation.registerCandidate), a
  */
 router.post('/livekit-token', validate(livekitValidation.getToken), livekitController.getTokenPublic);
 
+/**
+ * GET /v1/public/waiting-participants/:roomName
+ * Public endpoint to get waiting participants (no auth required)
+ * Host verification happens via email check in the controller
+ */
+router.get(
+  '/waiting-participants/:roomName',
+  validate(livekitValidation.getWaitingParticipants),
+  livekitController.getWaitingParticipantsPublic
+);
+
+/**
+ * POST /v1/public/admit-participant
+ * Public endpoint to admit a waiting participant (no auth required)
+ * Host verification happens via email check in the controller
+ */
+router.post(
+  '/admit-participant',
+  validate(livekitValidation.admitParticipant),
+  livekitController.admitParticipantPublic
+);
+
+/**
+ * POST /v1/public/remove-participant
+ * Public endpoint to remove a waiting participant (no auth required)
+ * Host verification happens via email check in the controller
+ */
+router.post(
+  '/remove-participant',
+  validate(livekitValidation.removeParticipant),
+  livekitController.removeParticipantPublic
+);
+
 export default router;
