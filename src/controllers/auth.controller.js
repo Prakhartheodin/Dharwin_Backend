@@ -39,10 +39,39 @@ const clearAuthCookies = (res) => {
 };
 
 /**
- * Administrator registers a user (POST /v1/auth/register).
- * Do not issue tokens or set cookies for the new user — leave the requester (admin) logged in.
+ * Register (POST /v1/auth/register).
+ * - Candidate from invite (role=user, adminId): create User (pending) + Candidate. No tokens until admin activates.
+ * - Admin registration (req.user present): create user, no tokens, activity log.
  */
 const register = catchAsync(async (req, res) => {
+  const { role, adminId, phoneNumber, countryCode } = req.body;
+
+  if (role === 'user' && adminId) {
+    const user = await createUser({
+      ...req.body,
+      role: 'user',
+      adminId,
+      status: 'pending',
+      phoneNumber: phoneNumber || undefined,
+      countryCode: countryCode || undefined,
+    });
+    const completionPercentage = 30;
+    await createCandidate(user._id, {
+      fullName: user.name,
+      email: user.email,
+      phoneNumber: (phoneNumber && String(phoneNumber).trim()) || '0000000000',
+      adminId,
+      isProfileCompleted: completionPercentage,
+    });
+    const verifyEmailToken = await generateVerifyEmailToken(user);
+    await sendVerificationEmail2(user.email, verifyEmailToken);
+    res.status(httpStatus.CREATED).send({
+      user,
+      message: 'Registration successful. Your account is pending administrator approval. You will be able to sign in once activated.',
+    });
+    return;
+  }
+
   const user = await createUser(req.body);
   if (req.user) {
     await activityLogService.createActivityLog(req.user.id, ActivityActions.USER_CREATE, EntityTypes.USER, user.id, { role: user.role }, req);
@@ -120,6 +149,35 @@ const publicRegisterCandidate = catchAsync(async (req, res) => {
       ? 'Registration successful. Your account is pending administrator approval. You will be able to sign in once activated.'
       : 'You were already registered. You have been added to the candidate list.',
   });
+});
+
+/**
+ * Register a recruiter (Admin only)
+ * Creates User with Recruiter role
+ */
+const registerRecruiter = catchAsync(async (req, res) => {
+  const recruiterRole = await getRoleByName('Recruiter');
+  const userData = {
+    ...req.body,
+    role: 'recruiter',
+    isEmailVerified: true,
+    status: 'active',
+    roleIds: recruiterRole ? [recruiterRole._id] : [],
+    phoneNumber: req.body.phoneNumber || undefined,
+    countryCode: req.body.countryCode || undefined,
+  };
+  const user = await createUser(userData);
+  if (req.user) {
+    await activityLogService.createActivityLog(
+      req.user.id,
+      ActivityActions.USER_CREATE,
+      EntityTypes.USER,
+      user.id,
+      { role: 'Recruiter' },
+      req
+    );
+  }
+  res.status(httpStatus.CREATED).send({ user });
 });
 
 /**
@@ -335,6 +393,7 @@ export {
   publicRegister,
   publicRegisterCandidate,
   registerStudent,
+  registerRecruiter,
   registerMentor,
   login,
   logout,

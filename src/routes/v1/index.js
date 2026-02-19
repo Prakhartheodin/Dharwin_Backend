@@ -21,10 +21,16 @@ import shiftRoute from './shift.route.js';
 import leaveRequestRoute from './leaveRequest.route.js';
 import backdatedAttendanceRequestRoute from './backdatedAttendanceRequest.route.js';
 import candidateRoute from './candidate.route.js';
+import jobRoute from './job.route.js';
+import recruiterActivityRoute from './recruiterActivity.route.js';
+import recruiterExcelRoute from './recruiterExcel.route.js';
 import docsRoute from './docs.route.js';
 import config from '../../config/config.js';
 import blogRoute from './blog.route.js';
 import livekitRoute from './livekit.route.js';
+import atsAnalyticsRoute from './atsAnalytics.route.js';
+import bolnaRoute from './bolna.route.js';
+import webhookRoute from './webhook.route.js';
 
 const router = express.Router();
 
@@ -102,6 +108,22 @@ const defaultRoutes = [
     route: candidateRoute,
   },
   {
+    path: '/jobs',
+    route: jobRoute,
+  },
+  {
+    path: '/recruiter-activities',
+    route: recruiterActivityRoute,
+  },
+  {
+    path: '/recruiters',
+    route: recruiterExcelRoute,
+  },
+  {
+    path: '/ats/analytics',
+    route: atsAnalyticsRoute,
+  },
+  {
     path: '/training/students',
     route: studentCourseRoute,
   },
@@ -124,6 +146,14 @@ const defaultRoutes = [
   {
     path: '/livekit',
     route: livekitRoute,
+  },
+  {
+    path: '/bolna',
+    route: bolnaRoute,
+  },
+  {
+    path: '/webhooks',
+    route: webhookRoute,
   },
 ];
 

@@ -49,8 +49,8 @@ const sendEmail = async (to, subject, text, html) => {
  */
 const sendResetPasswordEmail = async (to, token) => {
   const subject = 'Reset Your Password - Dharwin Business Solutions';
-  // TODO: replace localhost URL with production frontend URL when deployed
-  const resetPasswordUrl = `http://localhost:3001/reset-password?token=${token}`;
+  const frontendBase = (config.frontendBaseUrl || 'http://localhost:3001').replace(/\/$/, '');
+  const resetPasswordUrl = `${frontendBase}/reset-password?token=${token}`;
   const text = `Dear user,
 
 To reset your password, click on this link: ${resetPasswordUrl}
@@ -135,8 +135,8 @@ If you did not request any password resets, then ignore this email.`;
  */
 const sendVerificationEmail = async (to, token) => {
   const subject = 'Email Verification';
-  // TODO: replace localhost URL with production frontend URL when deployed
-  const verificationEmailUrl = `http://localhost:3001/verify-email?token=${token}`;
+  const frontendBase = (config.frontendBaseUrl || 'http://localhost:3001').replace(/\/$/, '');
+  const verificationEmailUrl = `${frontendBase}/verify-email?token=${token}`;
   const text = `Dear user,
 
 To verify your email, click on this link: ${verificationEmailUrl}
@@ -354,6 +354,119 @@ Dharwin Team`;
   await sendEmail(to, subject, text, html);
 };
 
+/**
+ * Send confirmation email when a candidate account is activated by admin.
+ * Used for users who registered via candidate share form (status was 'pending').
+ * @param {string} to - User email
+ * @param {string} name - User name
+ * @returns {Promise}
+ */
+const sendCandidateAccountActivationEmail = async (to, name) => {
+  const signInUrl = `${(config.frontendBaseUrl || 'http://localhost:3001').replace(/\/$/, '')}/authentication/sign-in/`;
+  const subject = 'Your Account Has Been Activated - Dharwin Business Solutions';
+  const displayName = name || 'there';
+  const text = `Dear ${displayName},
+
+Your Dharwin account has been activated by an administrator. You can now sign in and access your profile.
+
+Sign in here: ${signInUrl}
+
+If you have any questions, please contact support.`;
+
+  const html = `
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
+          <tr>
+            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="left" style="font-size:20px;font-weight:600;">
+                    Dharwin Business Solutions
+                  </td>
+                  <td align="right" style="font-size:13px;opacity:0.9;">
+                    Account Activated
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 32px 12px 32px;color:#111827;">
+              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">
+                Your Account Is Ready
+              </h1>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
+                Hello ${displayName},
+              </p>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
+                Your account has been activated by an administrator. You can now sign in and access your profile.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 32px 24px 32px;">
+              <a href="${signInUrl}"
+                 style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">
+                Sign In Now
+              </a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
+              <p style="margin:0 0 8px 0;">
+                If the button above does not work, copy and paste this link into your browser:
+              </p>
+              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;">
+                <a href="${signInUrl}" style="color:#2563eb;text-decoration:none;">${signInUrl}</a>
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
+              <p style="margin:0 0 4px 0;">
+                This email was sent by Dharwin Business Solutions. Please do not reply to this automated message.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+  `;
+
+  await sendEmail(to, subject, text, html);
+};
+
+/**
+ * Send job share email
+ * @param {string} to
+ * @param {Object} job - { title, organisation, location, jobDescription }
+ * @param {string} [customMessage]
+ */
+const sendJobShareEmail = async (to, job, customMessage = '') => {
+  const subject = `Job Opportunity: ${job.title} at ${job.organisation?.name || 'Company'}`;
+  const jobUrl = `${config.frontendBaseUrl || 'http://localhost:3001'}/ats/jobs`;
+  const text = `You have been shared a job opportunity:\n\n${job.title}\n${job.organisation?.name || ''}\n${job.location || ''}\n\n${job.jobDescription || ''}\n\nView jobs: ${jobUrl}`;
+  const html = `
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,sans-serif;">
+    <tr><td align="center">
+      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
+        <tr><td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px;color:#fff;font-size:18px;font-weight:600;">Job Opportunity</td></tr>
+        <tr><td style="padding:24px;">
+          <h2 style="margin:0 0 12px 0;">${job.title}</h2>
+          <p style="margin:0 0 8px 0;color:#6b7280;">${job.organisation?.name || ''} &bull; ${job.location || ''}</p>
+          ${customMessage ? `<p style="margin:0 0 16px 0;">${customMessage}</p>` : ''}
+          <div style="margin:16px 0;padding:12px;background:#f9fafb;border-radius:6px;">${(job.jobDescription || '').substring(0, 500)}${(job.jobDescription || '').length > 500 ? '...' : ''}</div>
+          <a href="${jobUrl}" style="display:inline-block;padding:12px 24px;background:#16a34a;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">View Job</a>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>`;
+  await sendEmail(to, subject, text, html);
+};
+
 export {
   transport,
   sendEmail,
@@ -361,5 +474,7 @@ export {
   sendVerificationEmail,
   sendCandidateInvitationEmail,
   sendCandidateProfileShareEmail,
+  sendCandidateAccountActivationEmail,
+  sendJobShareEmail,
 };
 

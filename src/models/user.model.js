@@ -61,6 +61,13 @@ const userSchema = mongoose.Schema(
       enum: ['active', 'pending', 'disabled', 'deleted'],
       default: 'active',
     },
+    phoneNumber: { type: String, trim: true },
+    countryCode: { type: String, trim: true },
+    adminId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    education: { type: String, trim: true },
+    domain: { type: [String], default: [] },
+    location: { type: String, trim: true },
+    profileSummary: { type: String, trim: true },
     lastLoginAt: {
       type: Date,
       default: null,
@@ -114,6 +121,16 @@ userSchema.pre('save', async function (next) {
   }
   if (user.isModified('password')) {
     user.password = await bcrypt.hash(user.password, 8);
+  }
+  // Normalize domain: ensure array of strings (backward compat with string)
+  if (user.domain != null) {
+    if (typeof user.domain === 'string') {
+      user.domain = user.domain.trim() ? [user.domain.trim()] : [];
+    } else if (Array.isArray(user.domain)) {
+      user.domain = user.domain.map((d) => String(d).trim()).filter(Boolean);
+    } else {
+      user.domain = [];
+    }
   }
   next();
 });

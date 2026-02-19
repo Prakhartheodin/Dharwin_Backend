@@ -1,0 +1,44 @@
+import Joi from 'joi';
+import { objectId } from './custom.validation.js';
+
+const initiateCall = {
+  body: Joi.object()
+    .keys({
+      phone: Joi.string().required().trim(),
+      candidateName: Joi.string().required().trim(),
+      name: Joi.string().trim(),
+      fromPhoneNumber: Joi.string().trim(),
+      jobId: Joi.string()
+        .custom(objectId)
+        .required()
+        .messages({ 'any.required': 'jobId is required for job posting verification call' }),
+    })
+    .required(),
+};
+
+const getCallStatus = {
+  params: Joi.object().keys({
+    executionId: Joi.string().required().trim(),
+  }),
+};
+
+const getCallRecords = {
+  query: Joi.object().keys({
+    page: Joi.number().integer().min(1),
+    limit: Joi.number().integer().min(1).max(500),
+    search: Joi.string().trim().allow(''),
+    status: Joi.string().trim().allow(''),
+    language: Joi.string().trim().allow(''),
+    sortBy: Joi.string().valid('date', 'createdAt').default('createdAt'),
+    order: Joi.string().valid('asc', 'desc').default('desc'),
+  }),
+};
+
+const deleteCallRecord = {
+  params: Joi.object().keys({
+    id: Joi.string().custom(objectId).required(),
+  }),
+};
+
+export { initiateCall, getCallStatus, getCallRecords, deleteCallRecord };
+

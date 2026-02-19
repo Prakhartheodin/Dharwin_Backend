@@ -14,6 +14,7 @@ import { authLimiter } from './middlewares/rateLimiter.js';
 import routes from './routes/v1/index.js';
 import { errorConverter, errorHandler } from './middlewares/error.js';
 import ApiError from './utils/ApiError.js';
+import * as bolnaController from './controllers/bolna.controller.js';
 
 const app = express();
 
@@ -78,6 +79,7 @@ if (config.env === 'production') {
 }
 
 // health / root (for Render health checks and visiting the URL)
+app.post('/', bolnaController.receiveWebhook);
 app.get('/', (req, res) => {
   res.status(httpStatus.OK).json({ status: 'ok', message: 'UAT Dharwin Backend API', docs: '/v1/docs' });
 });

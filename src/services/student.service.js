@@ -1,9 +1,11 @@
 import httpStatus from 'http-status';
 import ApiError from '../utils/ApiError.js';
+import Candidate from '../models/candidate.model.js';
 import Student from '../models/student.model.js';
 import User from '../models/user.model.js';
 import { generatePresignedDownloadUrl } from '../config/s3.js';
 import { uploadFileToS3 } from './upload.service.js';
+// eslint-disable-next-line import/no-cycle
 import { createUser } from './user.service.js';
 import { getRoleByName } from './role.service.js';
 import { getShiftById } from './shift.service.js';
@@ -190,6 +192,46 @@ const getStudentProfileImageUrl = async (studentId) => {
 };
 
 /**
+ * Delete student profile by user id (cascade when user is deleted)
+ * @param {ObjectId} userId
+ * @returns {Promise<Student|null>} Deleted student or null if none
+ */
+const deleteStudentByUserId = async (userId) => {
+  const student = await Student.findOne({ user: userId });
+  if (!student) return null;
+  await student.deleteOne();
+  return student;
+};
+
+/**
+ * Ensure a Student profile exists for a user who has the Student role.
+ * Creates one if missing. No-op if user lacks Student role or already has a profile.
+ * @param {ObjectId} userId
+ * @returns {Promise<Student|null>} Created/existing student or null
+ */
+const ensureStudentProfileForUser = async (userId) => {
+  const studentRole = await getRoleByName('Student');
+  if (!studentRole) return null;
+
+  const user = await User.findById(userId);
+  if (!user) return null;
+
+  const hasStudentRole = (user.roleIds || []).some(
+    (id) => id && id.toString() === studentRole._id.toString()
+  );
+  if (!hasStudentRole) return null;
+
+  const existing = await Student.findOne({ user: userId });
+  if (existing) return existing;
+
+  const student = await Student.create({
+    user: userId,
+    status: 'active',
+  });
+  return getStudentById(student.id);
+};
+
+/**
  * Create a Student profile for an existing User who has the Student role.
  * Use this when a user was created via User Management with the Student role
  * but has no Training student profile yet (so they don't appear in course assignment).
@@ -222,9 +264,14 @@ const createStudentFromUser = async (userId) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'This user already has a student profile.');
   }
 
+  // Sync joiningDate from Candidate if user has one (attendance starts from joining date)
+  const candidate = await Candidate.findOne({ owner: userId }).select('joiningDate').lean();
+  const joiningDate = candidate?.joiningDate || null;
+
   const student = await Student.create({
     user: userId,
     status: 'active',
+    joiningDate,
   });
   return getStudentById(student.id);
 };
@@ -384,7 +431,7 @@ const getStudentWeekOff = async (studentId) => {
  * @param {string} shiftId
  * @param {Object} user
  */
-const assignShiftToStudents = async (studentIds, shiftId, user) => {
+const assignShiftToStudents = async (studentIds, shiftId, _user) => {
   const shift = await getShiftById(shiftId);
 
   const students = await Student.find({ _id: { $in: studentIds } });
@@ -429,6 +476,8 @@ export {
   getStudentByUserId,
   updateStudentById,
   deleteStudentById,
+  deleteStudentByUserId,
+  ensureStudentProfileForUser,
   updateStudentProfileImage,
   getStudentProfileImageUrl,
   createStudentFromUser,

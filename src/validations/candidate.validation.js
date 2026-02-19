@@ -100,6 +100,7 @@ const singleCandidateSchema = Joi.object().keys({
   skills: Joi.array().items(skill),
   socialLinks: Joi.array().items(socialLink),
   salarySlips: Joi.array().items(salarySlip),
+  joiningDate: Joi.date().optional(),
 });
 
 const createCandidate = {
@@ -191,6 +192,11 @@ const updateCandidate = {
       salarySlips: Joi.array().items(salarySlip),
     })
     .min(1),
+};
+
+/** Same body as updateCandidate, no params (for PATCH /me). */
+const updateMyCandidate = {
+  body: updateCandidate.body,
 };
 
 const deleteCandidate = {
@@ -410,6 +416,7 @@ export {
   getCandidates,
   getCandidate,
   updateCandidate,
+  updateMyCandidate,
   deleteCandidate,
   exportCandidate,
   exportAllCandidates,

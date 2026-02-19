@@ -1,5 +1,6 @@
 import httpStatus from 'http-status';
 import Candidate from '../models/candidate.model.js';
+import Student from '../models/student.model.js';
 import User from '../models/user.model.js';
 import Token from '../models/token.model.js';
 import { createUser, getUserByEmail, updateUserById, getUserById } from './user.service.js';
@@ -9,6 +10,7 @@ import { getShiftById } from './shift.service.js';
 import { generatePresignedDownloadUrl } from '../config/s3.js';
 import config from '../config/config.js';
 import ApiError from '../utils/ApiError.js';
+import logger from '../config/logger.js';
 
 /** User may have canManageCandidates set by controller (from candidates.manage permission). */
 const isOwnerOrAdmin = (user, candidate) => {
@@ -161,14 +163,20 @@ const createCandidate = async (ownerId, payload) => {
         shouldAutoVerifyEmail = true;
       }
       
-      const { password, ...rest } = candidateData; // never store password on candidate
+      // eslint-disable-next-line no-unused-vars -- password intentionally discarded
+      const { password, joiningDate: inputJoiningDate, ...rest } = candidateData; // never store password on candidate
       
+      // Default joiningDate to today when account is created
+      const joiningDate = inputJoiningDate ? new Date(inputJoiningDate) : new Date();
+      const candidatePayload = {
+        owner: resolvedOwnerId,
+        adminId: candidateData.adminId || resolvedOwnerId,
+        joiningDate,
+        ...rest,
+      };
+
       // Create candidate with calculated profile completion
-      const candidate = await Candidate.create({ 
-        owner: resolvedOwnerId, 
-        adminId: candidateData.adminId || resolvedOwnerId, // Use provided adminId or default to owner
-        ...rest 
-      });
+      const candidate = await Candidate.create(candidatePayload);
       
       // Calculate and update profile completion percentage and completion status
       candidate.isProfileCompleted = calculateProfileCompletion(candidate);
@@ -178,6 +186,13 @@ const createCandidate = async (ownerId, payload) => {
       // Auto-verify email if all required data is provided
       if (shouldAutoVerifyEmail) {
         await updateUserById(resolvedOwnerId, { isEmailVerified: true });
+      }
+
+      // Sync joiningDate to Student if user has a Student profile (for attendance)
+      const student = await Student.findOne({ user: resolvedOwnerId });
+      if (student) {
+        student.joiningDate = candidate.joiningDate;
+        await student.save();
       }
       
       results.successful.push({
@@ -209,7 +224,9 @@ const createCandidate = async (ownerId, payload) => {
 
 /**
  * Calculate total years of experience from experiences array
+ * @internal reserved for future use
  */
+// eslint-disable-next-line no-unused-vars
 const calculateYearsOfExperience = (experiences) => {
   if (!experiences || experiences.length === 0) return 0;
   
@@ -234,7 +251,9 @@ const calculateYearsOfExperience = (experiences) => {
 
 /**
  * Map years of experience to experience level
+ * @internal reserved for future use
  */
+// eslint-disable-next-line no-unused-vars
 const mapExperienceLevel = (years) => {
   if (years < 2) return 'Entry Level';
   if (years < 5) return 'Mid Level';
@@ -624,7 +643,7 @@ const getCandidateById = async (id) => {
         const profilePictureUrl = await generatePresignedDownloadUrl(candidate.profilePicture.key, 7 * 24 * 3600);
         candidate.profilePicture.url = profilePictureUrl;
       } catch (error) {
-        console.error('Failed to regenerate profile picture URL:', error);
+        logger.error('Failed to regenerate profile picture URL:', error);
       }
     }
     
@@ -638,7 +657,7 @@ const getCandidateById = async (id) => {
               const freshUrl = await generatePresignedDownloadUrl(doc.key, 7 * 24 * 3600);
               doc.url = freshUrl;
             } catch (error) {
-              console.error('Failed to regenerate URL for candidate document:', error);
+              logger.error('Failed to regenerate URL for candidate document:', error);
               // Fallback: keep existing URL (could be old S3 URL or API URL)
             }
           }
@@ -656,7 +675,7 @@ const getCandidateById = async (id) => {
               const freshUrl = await generatePresignedDownloadUrl(slip.key, 7 * 24 * 3600);
               slip.documentUrl = freshUrl;
             } catch (error) {
-              console.error(`Failed to regenerate URL for salary slip:`, error);
+              logger.error('Failed to regenerate URL for salary slip:', error);
             }
           }
         })
@@ -913,7 +932,7 @@ const getDocumentStatus = async (candidateId, user) => {
         try {
           url = await generatePresignedDownloadUrl(doc.key, 7 * 24 * 3600);
         } catch (error) {
-          console.error('Failed to regenerate URL for candidate document (status):', error);
+          logger.error('Failed to regenerate URL for candidate document (status):', error);
         }
       }
       
@@ -960,7 +979,7 @@ const getDocuments = async (candidateId, user) => {
         try {
           url = await generatePresignedDownloadUrl(doc.key, 7 * 24 * 3600);
         } catch (error) {
-          console.error('Failed to regenerate URL for candidate document (list):', error);
+          logger.error('Failed to regenerate URL for candidate document (list):', error);
         }
       }
       
@@ -1060,7 +1079,7 @@ const getDocumentDownloadUrl = async (candidateId, documentIndex, user) => {
         };
       } catch (error) {
         // If key extraction fails, fall back to stored URL
-        console.warn(`Failed to generate presigned URL from extracted key "${extractedKey}": ${error.message}`);
+        logger.warn(`Failed to generate presigned URL from extracted key "${extractedKey}": ${error.message}`);
       }
     }
     
@@ -1153,7 +1172,7 @@ const getPublicCandidateProfile = async (candidateId, token, data) => {
       const profilePictureUrl = await generatePresignedDownloadUrl(profilePicture.key, 7 * 24 * 3600);
       profilePicture = { ...profilePicture.toObject(), url: profilePictureUrl };
     } catch (error) {
-      console.error('Failed to regenerate profile picture URL:', error);
+      logger.error('Failed to regenerate profile picture URL:', error);
     }
   }
   
@@ -1161,14 +1180,14 @@ const getPublicCandidateProfile = async (candidateId, token, data) => {
   let documents = [];
   if (shareData.withDoc && candidate.documents) {
     documents = await Promise.all(
-      candidate.documents.map(async (doc, index) => {
+      candidate.documents.map(async (doc, _index) => {
         let url = doc.url;
 
         if (doc.key) {
           try {
             url = await generatePresignedDownloadUrl(doc.key, 7 * 24 * 3600);
           } catch (error) {
-            console.error('Failed to regenerate URL for public candidate document:', error);
+            logger.error('Failed to regenerate URL for public candidate document:', error);
           }
         }
 
@@ -1187,7 +1206,7 @@ const getPublicCandidateProfile = async (candidateId, token, data) => {
           try {
             documentUrl = await generatePresignedDownloadUrl(slip.key, 7 * 24 * 3600);
           } catch (error) {
-            console.error(`Failed to regenerate URL for salary slip:`, error);
+            logger.error('Failed to regenerate URL for salary slip:', error);
           }
         }
         return { ...slip.toObject(), documentUrl };
@@ -1327,7 +1346,7 @@ const addRecruiterNote = async (candidateId, note, recruiterId) => {
 /**
  * Add recruiter feedback to candidate
  */
-const addRecruiterFeedback = async (candidateId, feedback, rating, recruiterId) => {
+const addRecruiterFeedback = async (candidateId, feedback, rating, _recruiterId) => {
   const candidate = await Candidate.findById(candidateId);
   if (!candidate) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Candidate not found');
@@ -1403,6 +1422,13 @@ const updateJoiningDate = async (candidateId, joiningDate, user) => {
   // Allow clearing joining date (setting to null)
   candidate.joiningDate = joiningDate ? new Date(joiningDate) : null;
   await candidate.save();
+
+  // Sync joiningDate to Student if user has a Student profile (for attendance)
+  const student = await Student.findOne({ user: candidate.owner });
+  if (student) {
+    student.joiningDate = candidate.joiningDate;
+    await student.save();
+  }
 
   // Populate fields
   await candidate.populate([

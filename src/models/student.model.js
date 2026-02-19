@@ -112,6 +112,12 @@ const studentSchema = mongoose.Schema(
       default: null,
       index: true,
     },
+    // Joining date - attendance is only valid from this date onwards (synced from Candidate when linked)
+    joiningDate: {
+      type: Date,
+      default: null,
+      index: true,
+    },
   },
   {
     timestamps: true,

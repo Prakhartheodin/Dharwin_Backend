@@ -48,6 +48,13 @@ const envVarsSchema = Joi.object()
     MINIO_SECRET_KEY: Joi.string().optional().default('minioadmin123').description('MinIO secret key'),
     MINIO_BUCKET: Joi.string().optional().default('recordings').description('MinIO bucket for recordings'),
     LIVEKIT_S3_BUCKET: Joi.string().optional().description('S3 bucket for recordings (production)'),
+
+    // Bolna Calling
+    BOLNA_API_KEY: Joi.string().optional().description('Bolna API key'),
+    BOLNA_AGENT_ID: Joi.string().optional().description('Bolna agent ID'),
+    BOLNA_FROM_PHONE_NUMBER: Joi.string().optional().description('Bolna caller ID in E.164 format'),
+    CALLER_ID: Joi.string().optional().description('Fallback caller ID for AddOn compatibility'),
+    BOLNA_API_BASE: Joi.string().optional().default('https://api.bolna.ai').description('Bolna API base URL'),
   })
   .unknown();
 
@@ -106,6 +113,12 @@ const config = {
       bucket: envVars.MINIO_BUCKET || 'recordings',
     },
     s3Bucket: envVars.LIVEKIT_S3_BUCKET,
+  },
+  bolna: {
+    apiKey: envVars.BOLNA_API_KEY || '',
+    agentId: envVars.BOLNA_AGENT_ID || '6afbccea-0495-4892-937c-6a5c9af12440',
+    fromPhoneNumber: envVars.BOLNA_FROM_PHONE_NUMBER || envVars.CALLER_ID || '',
+    apiBase: envVars.BOLNA_API_BASE || 'https://api.bolna.ai',
   },
 };
 

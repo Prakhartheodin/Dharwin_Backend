@@ -3,6 +3,7 @@ import httpStatus from 'http-status';
 import ApiError from '../utils/ApiError.js';
 import User from '../models/user.model.js';
 import Token from '../models/token.model.js';
+import logger from '../config/logger.js';
 
 
 /**
@@ -14,7 +15,14 @@ const createUser = async (userBody) => {
   if (await User.isEmailTaken(userBody.email)) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Email already taken');
   }
-  return User.create(userBody);
+  const user = await User.create(userBody);
+  // Auto-create Student profile when user has Student role (avoids 404 on /training/students/me)
+  if (user.roleIds?.length) {
+    // eslint-disable-next-line import/no-cycle
+    const { ensureStudentProfileForUser } = await import('./student.service.js');
+    await ensureStudentProfileForUser(user.id).catch(() => {});
+  }
+  return user;
 };
 
 /**
@@ -73,13 +81,29 @@ const updateUserById = async (userId, updateBody) => {
   if (updateBody.email && (await User.isEmailTaken(updateBody.email, userId))) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Email already taken');
   }
+  const previousStatus = user.status;
   Object.assign(user, updateBody);
   await user.save();
+
+  // Send confirmation email when candidate account is activated by admin (pending -> active)
+  if (updateBody.status === 'active' && previousStatus === 'pending' && user.email) {
+    const { sendCandidateAccountActivationEmail } = await import('./email.service.js');
+    sendCandidateAccountActivationEmail(user.email, user.name).catch((err) => {
+      logger.warn(`Failed to send account activation email to ${user.email}: ${err?.message || err}`);
+    });
+  }
+  // Auto-create Student profile when user gains Student role (avoids 404 on /training/students/me)
+  if (user.roleIds?.length) {
+    // eslint-disable-next-line import/no-cycle
+    const { ensureStudentProfileForUser } = await import('./student.service.js');
+    await ensureStudentProfileForUser(user.id).catch(() => {});
+  }
   return user;
 };
 
 /**
  * Delete user by id.
+ * Also deletes linked Student profile (cascade).
  * Invalidates only the deleted user's sessions/tokens (Token documents for that user).
  * Does not touch the requester's session or cookies.
  * @param {ObjectId} userId
@@ -90,6 +114,10 @@ const deleteUserById = async (userId) => {
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, 'User not found');
   }
+  // Cascade delete Student profile when user has Student role
+  // eslint-disable-next-line import/no-cycle
+  const { deleteStudentByUserId } = await import('./student.service.js');
+  await deleteStudentByUserId(userId).catch(() => {});
   await user.deleteOne();
   // Invalidate only this user's tokens (refresh, reset, verify). Do not touch the requester's tokens.
   await Token.deleteMany({ user: userId });

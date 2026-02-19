@@ -42,6 +42,12 @@ const updateUser = {
       name: Joi.string(),
       roleIds: Joi.array().items(Joi.string().custom(objectId)),
       status: Joi.string().valid('active', 'pending', 'disabled', 'deleted'),
+      phoneNumber: Joi.string().trim().allow('', null),
+      countryCode: Joi.string().trim().allow('', null),
+      education: Joi.string().trim().allow('', null),
+      domain: Joi.array().items(Joi.string().trim()).allow(null),
+      location: Joi.string().trim().allow('', null),
+      profileSummary: Joi.string().trim().allow('', null),
     })
     .min(1),
 };

@@ -8,6 +8,15 @@ const register = {
     name: Joi.string().required(),
     isEmailVerified: Joi.boolean().optional(),
     roleIds: Joi.array().items(Joi.string().custom(objectId)).optional(),
+    // Dharwrin-style candidate registration from invite link
+    role: Joi.string().valid('user', 'admin', 'supervisor', 'recruiter').optional(),
+    phoneNumber: Joi.string().allow('').optional(),
+    countryCode: Joi.string().allow('').optional(),
+    adminId: Joi.when('role', {
+      is: 'user',
+      then: Joi.string().custom(objectId),
+      otherwise: Joi.optional(),
+    }),
   }),
 };
 
@@ -160,6 +169,20 @@ const registerStudent = {
   }),
 };
 
+const registerRecruiter = {
+  body: Joi.object().keys({
+    email: Joi.string().required().email(),
+    password: Joi.string().required().custom(password),
+    name: Joi.string().required(),
+    phoneNumber: Joi.string().optional().allow('', null),
+    countryCode: Joi.string().optional().allow('', null),
+    education: Joi.string().optional().allow('', null),
+    domain: Joi.alternatives().try(Joi.string(), Joi.array().items(Joi.string())).optional(),
+    location: Joi.string().optional().allow('', null),
+    profileSummary: Joi.string().optional().allow('', null),
+  }),
+};
+
 const registerMentor = {
   body: Joi.object().keys({
     // User fields
@@ -212,5 +235,20 @@ const registerMentor = {
   }),
 };
 
-export { register, registerCandidate, registerStudent, registerMentor, login, logout, refreshTokens, forgotPassword, resetPassword, changePassword, verifyEmail, impersonate, sendCandidateInvitation };
+export {
+  register,
+  registerCandidate,
+  registerRecruiter,
+  registerStudent,
+  registerMentor,
+  login,
+  logout,
+  refreshTokens,
+  forgotPassword,
+  resetPassword,
+  changePassword,
+  verifyEmail,
+  impersonate,
+  sendCandidateInvitation,
+};
 

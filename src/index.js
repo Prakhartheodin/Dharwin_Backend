@@ -2,11 +2,21 @@ import mongoose from 'mongoose';
 import app from './app.js';
 import config from './config/config.js';
 import logger from './config/logger.js';
-import { startAttendanceScheduler } from './services/attendance.scheduler.js';
-import { startCandidateScheduler } from './services/candidate.scheduler.js';
+import { startAttendanceScheduler, stopAttendanceScheduler } from './services/attendance.scheduler.js';
+import { startCandidateScheduler, stopCandidateScheduler } from './services/candidate.scheduler.js';
+import {
+  startJobVerificationCallScheduler,
+  stopJobVerificationCallScheduler,
+} from './services/jobVerificationCall.scheduler.js';
+import {
+  startCallRecordSyncScheduler,
+  stopCallRecordSyncScheduler,
+} from './services/callRecordSync.scheduler.js';
 
 let server;
 let candidateSchedulerId;
+let jobVerificationSchedulerId;
+let callRecordSyncSchedulerId;
 const port = config.port || process.env.PORT || 3000;
 
 mongoose
@@ -18,6 +28,8 @@ mongoose
       if (config.env !== 'test') {
         startAttendanceScheduler();
         candidateSchedulerId = startCandidateScheduler(config.candidate?.schedulerIntervalMinutes ?? 60);
+        jobVerificationSchedulerId = startJobVerificationCallScheduler(1);
+        callRecordSyncSchedulerId = startCallRecordSyncScheduler(1);
       }
     });
   })
@@ -27,6 +39,11 @@ mongoose
   });
 
 const exitHandler = () => {
+  stopAttendanceScheduler();
+  stopCandidateScheduler(candidateSchedulerId);
+  stopJobVerificationCallScheduler(jobVerificationSchedulerId);
+  stopCallRecordSyncScheduler(callRecordSyncSchedulerId);
+
   if (server) {
     server.close(() => {
       logger.info('Server closed');

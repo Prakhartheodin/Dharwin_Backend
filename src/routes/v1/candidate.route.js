@@ -16,6 +16,12 @@ router
   .post(auth(), requirePermissions('candidates.manage'), validate(candidateValidation.createCandidate), candidateController.create)
   .get(...canRead, validate(candidateValidation.getCandidates), candidateController.list);
 
+/** Current user's own candidate – auth only (for role 'user' from share-candidate-form). Must be before /:candidateId. */
+router
+  .route('/me')
+  .get(auth(), candidateController.getMyCandidate)
+  .patch(auth(), validate(candidateValidation.updateMyCandidate), candidateController.updateMyCandidate);
+
 router
   .route('/export')
   .post(...canManage, validate(candidateValidation.exportAllCandidates), candidateController.exportAll);

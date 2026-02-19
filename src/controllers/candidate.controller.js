@@ -29,6 +29,8 @@ import {
   assignShiftToCandidates
 } from '../services/candidate.service.js';
 import { sendCandidateProfileShareEmail, sendEmail } from '../services/email.service.js';
+import { logActivity } from '../services/recruiterActivity.service.js';
+import { userHasRecruiterRole } from '../utils/roleHelpers.js';
 
 const canManageCandidates = (req) => req.authContext?.permissions?.has('candidates.manage') ?? false;
 
@@ -125,7 +127,28 @@ const remove = catchAsync(async (req, res) => {
   res.status(httpStatus.NO_CONTENT).send();
 });
 
-export { create, list, get, update, remove };
+/** Get current user's own candidate (auth only, no candidates.read). Used by my-profile for role 'user'. */
+const getMyCandidate = catchAsync(async (req, res) => {
+  const result = await queryCandidates({ owner: req.user._id }, { limit: 1, page: 1 });
+  const candidate = result.results?.[0] || null;
+  if (!candidate) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'No candidate profile found for your account');
+  }
+  res.send(candidate);
+});
+
+/** Update current user's own candidate (auth only, no candidates.read). */
+const updateMyCandidate = catchAsync(async (req, res) => {
+  const result = await queryCandidates({ owner: req.user._id }, { limit: 1, page: 1 });
+  const candidate = result.results?.[0] || null;
+  if (!candidate) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'No candidate profile found for your account');
+  }
+  const updated = await updateCandidateById(candidate._id || candidate.id, req.body, req.user);
+  res.send(updated);
+});
+
+export { create, list, get, getMyCandidate, updateMyCandidate, update, remove };
 
 const exportProfile = catchAsync(async (req, res) => {
   req.user.canManageCandidates = canManageCandidates(req);
@@ -1112,8 +1135,15 @@ const addNote = catchAsync(async (req, res) => {
   req.user.canManageCandidates = canManageCandidates(req);
   const { candidateId } = req.params;
   const { note } = req.body;
-  const recruiterId = req.user._id;
+  const recruiterId = req.user._id || req.user.id;
   const candidate = await addRecruiterNote(candidateId, note, recruiterId);
+  if (await userHasRecruiterRole(req.user)) {
+    await logActivity(recruiterId, 'note_added', {
+      candidateId,
+      description: 'Added note to candidate',
+      metadata: { noteLength: note?.length },
+    });
+  }
   res.status(httpStatus.OK).send(candidate);
 });
 
@@ -1121,8 +1151,15 @@ const addFeedback = catchAsync(async (req, res) => {
   req.user.canManageCandidates = canManageCandidates(req);
   const { candidateId } = req.params;
   const { feedback, rating } = req.body;
-  const recruiterId = req.user._id;
+  const recruiterId = req.user._id || req.user.id;
   const candidate = await addRecruiterFeedback(candidateId, feedback, rating, recruiterId);
+  if (await userHasRecruiterRole(req.user)) {
+    await logActivity(recruiterId, 'feedback_added', {
+      candidateId,
+      description: 'Added feedback to candidate',
+      metadata: { rating },
+    });
+  }
   res.status(httpStatus.OK).send(candidate);
 });
 
@@ -1133,7 +1170,15 @@ const assignRecruiter = catchAsync(async (req, res) => {
   }
   const { candidateId } = req.params;
   const { recruiterId } = req.body;
+  const assignedBy = req.user._id || req.user.id;
   const candidate = await assignRecruiterToCandidate(candidateId, recruiterId);
+  if (await userHasRecruiterRole(req.user)) {
+    await logActivity(assignedBy, 'candidate_screened', {
+      candidateId,
+      description: `Assigned recruiter to candidate`,
+      metadata: { assignedRecruiterId: recruiterId },
+    });
+  }
   res.status(httpStatus.OK).send(candidate);
 });
 

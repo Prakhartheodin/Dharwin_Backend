@@ -105,7 +105,7 @@ const getHolidayDates = (holiday) => {
  * @param {Object} body - { punchInTime?, notes?, timezone? }
  */
 const punchIn = async (studentId, body = {}) => {
-  const student = await Student.findById(studentId).populate('user', 'email');
+  const student = await Student.findById(studentId).populate('user', 'email').select('joiningDate');
   if (!student) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Student not found');
   }
@@ -116,6 +116,17 @@ const punchIn = async (studentId, body = {}) => {
 
   const attendanceDate = getUtcMidnight(punchInTime);
   const day = getDayName(attendanceDate);
+
+  // Attendance starts from joining date (if set)
+  if (student.joiningDate) {
+    const joiningMidnight = getUtcMidnight(student.joiningDate);
+    if (attendanceDate < joiningMidnight) {
+      throw new ApiError(
+        httpStatus.BAD_REQUEST,
+        `Attendance cannot be recorded before joining date (${joiningMidnight.toISOString().split('T')[0]})`
+      );
+    }
+  }
 
   // Only reuse a record that is still active (no punch-out yet). Every completed session
   // stays as its own entry; a new punch-in on the same day creates a new record.
@@ -239,16 +250,21 @@ const getCurrentPunchStatus = async (studentId) => {
  * List attendance records for a student with optional date range.
  */
 const listByStudent = async (studentId, query = {}) => {
-  const student = await Student.findById(studentId);
+  const student = await Student.findById(studentId).select('joiningDate');
   if (!student) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Student not found');
   }
 
   const { startDate, endDate, limit = 100, page = 1 } = query;
   const filter = { student: studentId, isActive: true };
-  if (startDate || endDate) {
+  if (startDate || endDate || student.joiningDate) {
     filter.date = {};
-    if (startDate) filter.date.$gte = getUtcMidnight(startDate);
+    const effectiveStart = startDate
+      ? getUtcMidnight(startDate)
+      : student.joiningDate
+        ? getUtcMidnight(student.joiningDate)
+        : null;
+    if (effectiveStart) filter.date.$gte = effectiveStart;
     if (endDate) filter.date.$lte = getUtcMidnight(endDate);
   }
 
@@ -295,16 +311,21 @@ const getLocalHourInTz = (date, timezone) => {
  * Includes totalHoursWeek, totalHoursMonth, averageSessionMinutes, latePunchInCount, earlyPunchOutCount.
  */
 const getStatistics = async (studentId, query = {}) => {
-  const student = await Student.findById(studentId);
+  const student = await Student.findById(studentId).select('joiningDate');
   if (!student) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Student not found');
   }
 
   const { startDate, endDate } = query;
   const filter = { student: studentId, isActive: true, punchOut: { $ne: null } };
-  if (startDate || endDate) {
+  if (startDate || endDate || student.joiningDate) {
     filter.date = {};
-    if (startDate) filter.date.$gte = getUtcMidnight(startDate);
+    const effectiveStart = startDate
+      ? getUtcMidnight(startDate)
+      : student.joiningDate
+        ? getUtcMidnight(student.joiningDate)
+        : null;
+    if (effectiveStart) filter.date.$gte = effectiveStart;
     if (endDate) filter.date.$lte = getUtcMidnight(endDate);
   }
 
@@ -504,8 +525,11 @@ const autoPunchOut = async (record, durationHours) => {
  * @param {Array<string>} holidayIds
  * @param {Object} user
  */
-const addHolidaysToStudents = async (studentIds, holidayIds, user) => {
-  const students = await Student.find({ _id: { $in: studentIds } }).populate('user', 'name email').lean();
+const addHolidaysToStudents = async (studentIds, holidayIds, _user) => {
+  const students = await Student.find({ _id: { $in: studentIds } })
+    .select('joiningDate')
+    .populate('user', 'name email')
+    .lean();
   if (students.length !== studentIds.length) {
     const foundIds = students.map((s) => String(s._id));
     const missingIds = studentIds.filter((id) => !foundIds.includes(String(id)));
@@ -546,12 +570,14 @@ const addHolidaysToStudents = async (studentIds, holidayIds, user) => {
     existingAttendances.map((r) => `${String(r.student)}|${new Date(r.date).getTime()}`)
   );
 
-  // 3. Build docs to insert (only where no attendance exists)
+  // 3. Build docs to insert (only where no attendance exists and date >= joining date)
   const toInsert = [];
   for (const student of students) {
     const studentId = String(student._id);
     const studentEmail = student.user?.email ?? student.studentEmail ?? '';
+    const joiningMidnight = student.joiningDate ? getUtcMidnight(student.joiningDate) : null;
     for (const hi of holidayInfos) {
+      if (joiningMidnight && hi.normalizedDate < joiningMidnight) continue;
       const key = `${studentId}|${hi.normalizedDate.getTime()}`;
       if (existingKeySet.has(key)) continue;
       toInsert.push({
@@ -615,7 +641,7 @@ const addHolidaysToStudents = async (studentIds, holidayIds, user) => {
  * Remove holidays from students (remove holiday IDs from students and delete Holiday attendance records).
  * Uses bulk DB operations so it scales to hundreds/thousands of students.
  */
-const removeHolidaysFromStudents = async (studentIds, holidayIds, user) => {
+const removeHolidaysFromStudents = async (studentIds, holidayIds, _user) => {
   const students = await Student.find({ _id: { $in: studentIds } }).populate('user', 'name email').lean();
   if (students.length !== studentIds.length) {
     const foundIds = students.map((s) => String(s._id));
@@ -664,8 +690,10 @@ const removeHolidaysFromStudents = async (studentIds, holidayIds, user) => {
  * @param {string} [notes]
  * @param {Object} user
  */
-const assignLeavesToStudents = async (studentIds, dates, leaveType, notes, user) => {
-  const students = await Student.find({ _id: { $in: studentIds } }).populate('user', 'name email');
+const assignLeavesToStudents = async (studentIds, dates, leaveType, notes, _user) => {
+  const students = await Student.find({ _id: { $in: studentIds } })
+    .select('joiningDate')
+    .populate('user', 'name email');
   if (students.length !== studentIds.length) {
     const foundIds = students.map((s) => String(s._id));
     const missingIds = studentIds.filter((id) => !foundIds.includes(String(id)));
@@ -697,10 +725,22 @@ const assignLeavesToStudents = async (studentIds, dates, leaveType, notes, user)
     const studentName = student.user?.name ?? student.user?.email ?? 'Student';
     const studentEmail = student.user?.email ?? '';
 
+    const joiningMidnight = student.joiningDate ? getUtcMidnight(student.joiningDate) : null;
+
     for (const date of normalizedDates) {
       const normalizedDate = new Date(date);
       const nextDay = new Date(normalizedDate);
       nextDay.setUTCDate(nextDay.getUTCDate() + 1);
+
+      if (joiningMidnight && normalizedDate < joiningMidnight) {
+        skipped.push({
+          studentId,
+          studentName,
+          date: normalizedDate.toISOString(),
+          reason: 'Date is before joining date',
+        });
+        continue;
+      }
 
       const existing = await Attendance.findOne({
         student: studentId,
@@ -763,13 +803,17 @@ const DAY_NAMES_ATTENDANCE = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thurs
  * @param {Array} attendanceEntries - [{ date, punchIn, punchOut?, timezone?, notes? }] (ISO strings or Date)
  * @param {Object} user - must have students.manage (checked by route)
  */
-const regularizeAttendance = async (studentId, attendanceEntries, user) => {
-  const student = await Student.findById(studentId).populate('user', 'email').populate('shift', 'name timezone startTime endTime');
+const regularizeAttendance = async (studentId, attendanceEntries, _user) => {
+  const student = await Student.findById(studentId)
+    .populate('user', 'email')
+    .populate('shift', 'name timezone startTime endTime')
+    .select('joiningDate');
   if (!student) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Student not found');
   }
   const studentEmail = student.user?.email ?? student.email ?? '';
   const shift = student.shift && (student.shift.startTime || student.shift.timezone) ? student.shift : null;
+  const joiningMidnight = student.joiningDate ? getUtcMidnight(student.joiningDate) : null;
 
   if (!Array.isArray(attendanceEntries) || attendanceEntries.length === 0) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'At least one attendance entry is required');
@@ -794,6 +838,11 @@ const regularizeAttendance = async (studentId, attendanceEntries, user) => {
 
       if (normalizedDate >= todayUTC) {
         throw new ApiError(httpStatus.BAD_REQUEST, `Entry ${i + 1}: Back-dated attendance must be for past dates only`);
+      }
+
+      if (joiningMidnight && normalizedDate < joiningMidnight) {
+        errors.push({ index: i, date: entry.date, reason: 'Date is before joining date' });
+        continue;
       }
 
       let punchIn = new Date(entry.punchIn);

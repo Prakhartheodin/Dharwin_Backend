@@ -1,0 +1,246 @@
+import httpStatus from 'http-status';
+import pick from '../utils/pick.js';
+import catchAsync from '../utils/catchAsync.js';
+import ApiError from '../utils/ApiError.js';
+import {
+  createJob,
+  queryJobs,
+  getJobById,
+  updateJobById,
+  deleteJobById,
+  exportJobsToExcel,
+  getJobsTemplateBuffer,
+  importJobsFromExcel,
+  createJobTemplate,
+  queryJobTemplates,
+  getJobTemplateById,
+  updateJobTemplateById,
+  deleteJobTemplateById,
+  createJobFromTemplate,
+  applyCandidateToJob,
+} from '../services/job.service.js';
+import { sendJobShareEmail } from '../services/email.service.js';
+import { logActivity } from '../services/recruiterActivity.service.js';
+import { userIsAdmin, userHasRecruiterRole } from '../utils/roleHelpers.js';
+
+// Job CRUD
+const create = catchAsync(async (req, res) => {
+  const createdById = req.user.id || req.user._id;
+  const job = await createJob(createdById, req.body);
+
+  if (await userHasRecruiterRole(req.user)) {
+    await logActivity(createdById, 'job_posting_created', {
+      jobId: job._id,
+      description: `Created job posting: ${job.title}`,
+      metadata: {
+        jobTitle: job.title,
+        organisation: job.organisation?.name,
+        status: job.status,
+      },
+    });
+  }
+
+  res.status(httpStatus.CREATED).send(job);
+});
+
+const list = catchAsync(async (req, res) => {
+  const filter = pick(req.query, [
+    'title',
+    'jobType',
+    'location',
+    'status',
+    'experienceLevel',
+    'createdBy',
+    'search',
+  ]);
+
+  filter.userRoleIds = req.user.roleIds || [];
+  filter.userId = req.user.id || req.user._id;
+
+  const options = pick(req.query, ['sortBy', 'limit', 'page']);
+  const result = await queryJobs(filter, options);
+  res.send(result);
+});
+
+const get = catchAsync(async (req, res) => {
+  const job = await getJobById(req.params.jobId);
+  if (!job) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Job not found');
+  }
+
+  const isAdmin = await userIsAdmin(req.user);
+  const isOwner = String(job.createdBy?._id || job.createdBy) === String(req.user.id || req.user._id);
+  if (!isAdmin && !isOwner) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
+  }
+
+  res.send(job);
+});
+
+const update = catchAsync(async (req, res) => {
+  const job = await updateJobById(req.params.jobId, req.body, req.user);
+  res.send(job);
+});
+
+const remove = catchAsync(async (req, res) => {
+  await deleteJobById(req.params.jobId, req.user);
+  res.status(httpStatus.NO_CONTENT).send();
+});
+
+// Excel Export
+const exportExcel = catchAsync(async (req, res) => {
+  const filter = pick(req.query, [
+    'title',
+    'jobType',
+    'location',
+    'status',
+    'experienceLevel',
+    'createdBy',
+  ]);
+
+  filter.userRoleIds = req.user.roleIds || [];
+  filter.userId = req.user.id || req.user._id;
+
+  const excelBuffer = await exportJobsToExcel(filter);
+
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader('Content-Disposition', `attachment; filename=jobs_export_${Date.now()}.xlsx`);
+  res.send(excelBuffer);
+});
+
+// Excel Template download
+const getExcelTemplate = catchAsync(async (req, res) => {
+  const excelBuffer = getJobsTemplateBuffer();
+  res.setHeader(
+    'Content-Type',
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  );
+  res.setHeader('Content-Disposition', 'attachment; filename=jobs_template.xlsx');
+  res.send(excelBuffer);
+});
+
+// Excel Import
+const importExcel = catchAsync(async (req, res) => {
+  if (!req.file) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'Excel file is required');
+  }
+
+  const createdById = req.user.id || req.user._id;
+  const result = await importJobsFromExcel(req.file.buffer, createdById);
+
+  if (result.summary.failed === 0) {
+    res.status(httpStatus.CREATED).send({
+      message: 'All jobs imported successfully',
+      ...result,
+    });
+  } else if (result.summary.successful === 0) {
+    res.status(httpStatus.BAD_REQUEST).send({
+      message: 'Failed to import any jobs',
+      ...result,
+    });
+  } else {
+    res.status(httpStatus.MULTI_STATUS).send({
+      message: 'Some jobs imported successfully, some failed',
+      ...result,
+    });
+  }
+});
+
+// Job Template CRUD
+const createTemplate = catchAsync(async (req, res) => {
+  const createdById = req.user.id || req.user._id;
+  const template = await createJobTemplate(createdById, req.body);
+  res.status(httpStatus.CREATED).send(template);
+});
+
+const listTemplates = catchAsync(async (req, res) => {
+  const filter = pick(req.query, ['title', 'createdBy']);
+
+  filter.userRoleIds = req.user.roleIds || [];
+  filter.userId = req.user.id || req.user._id;
+
+  const options = pick(req.query, ['sortBy', 'limit', 'page']);
+  const result = await queryJobTemplates(filter, options);
+  res.send(result);
+});
+
+const getTemplate = catchAsync(async (req, res) => {
+  const template = await getJobTemplateById(req.params.templateId);
+  if (!template) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Job template not found');
+  }
+
+  const isAdmin = await userIsAdmin(req.user);
+  const isOwner =
+    String(template.createdBy?._id || template.createdBy) === String(req.user.id || req.user._id);
+  if (!isAdmin && !isOwner) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
+  }
+
+  res.send(template);
+});
+
+const updateTemplate = catchAsync(async (req, res) => {
+  const template = await updateJobTemplateById(req.params.templateId, req.body, req.user);
+  res.send(template);
+});
+
+const removeTemplate = catchAsync(async (req, res) => {
+  await deleteJobTemplateById(req.params.templateId, req.user);
+  res.status(httpStatus.NO_CONTENT).send();
+});
+
+// Create job from template
+const createFromTemplate = catchAsync(async (req, res) => {
+  const createdById = req.user.id || req.user._id;
+  const { templateId } = req.params;
+  const job = await createJobFromTemplate(templateId, createdById, req.body);
+  res.status(httpStatus.CREATED).send(job);
+});
+
+// Apply candidate to job
+const applyToJob = catchAsync(async (req, res) => {
+  const { jobId } = req.params;
+  const { candidateId } = req.body;
+  const appliedById = req.user.id || req.user._id;
+  const application = await applyCandidateToJob(jobId, candidateId, appliedById, req.user);
+  res.status(httpStatus.CREATED).send(application);
+});
+
+// Share job via email
+const shareJobEmail = catchAsync(async (req, res) => {
+  const job = await getJobById(req.params.jobId);
+  if (!job) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Job not found');
+  }
+  const isAdmin = await userIsAdmin(req.user);
+  const isOwner = String(job.createdBy?._id || job.createdBy) === String(req.user.id || req.user._id);
+  if (!isAdmin && !isOwner) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
+  }
+  const { to, message } = req.body;
+  await sendJobShareEmail(to, job, message);
+  res.send({ message: 'Job shared successfully' });
+});
+
+export {
+  create,
+  list,
+  get,
+  update,
+  remove,
+  exportExcel,
+  getExcelTemplate,
+  importExcel,
+  createTemplate,
+  listTemplates,
+  getTemplate,
+  updateTemplate,
+  removeTemplate,
+  createFromTemplate,
+  applyToJob,
+  shareJobEmail,
+};
