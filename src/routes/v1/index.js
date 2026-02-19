@@ -25,6 +25,7 @@ import docsRoute from './docs.route.js';
 import config from '../../config/config.js';
 import blogRoute from './blog.route.js';
 import livekitRoute from './livekit.route.js';
+import meetingRoute from './meeting.route.js';
 
 const router = express.Router();
 
@@ -124,6 +125,10 @@ const defaultRoutes = [
   {
     path: '/livekit',
     route: livekitRoute,
+  },
+  {
+    path: '/meetings',
+    route: meetingRoute,
   },
 ];
 

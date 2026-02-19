@@ -354,6 +354,82 @@ Dharwin Team`;
   await sendEmail(to, subject, text, html);
 };
 
+/**
+ * Send meeting/interview invitation email with public join URL
+ * @param {string} to - Recipient email
+ * @param {Object} params - { title, scheduledAt, durationMinutes, publicMeetingUrl }
+ * @returns {Promise}
+ */
+const sendMeetingInvitationEmail = async (to, params) => {
+  const { title, scheduledAt, durationMinutes, publicMeetingUrl } = params;
+  const subject = `Interview Invitation: ${title} - Dharwin Business Solutions`;
+  const scheduledStr = scheduledAt ? new Date(scheduledAt).toLocaleString('en-IN', { timeZone: 'Asia/Calcutta' }) : 'To be confirmed';
+  const durationStr = durationMinutes ? `${durationMinutes} minutes` : '';
+
+  const text = `Dear Participant,
+
+You are invited to join the following meeting:
+
+Title: ${title}
+Scheduled: ${scheduledStr}
+Duration: ${durationStr}
+
+Join the meeting (no login required): ${publicMeetingUrl}
+
+When joining, you will be asked to allow camera and/or microphone. At least one is required to participate.
+
+Best regards,
+Dharwin Business Solutions`;
+
+  const html = `
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
+          <tr>
+            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="left" style="font-size:20px;font-weight:600;">Dharwin Business Solutions</td>
+                  <td align="right" style="font-size:13px;opacity:0.9;">Interview Invitation</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:28px 32px 12px 32px;color:#111827;">
+              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">You're invited to join</h1>
+              <p style="margin:0 0 8px 0;font-size:18px;font-weight:600;color:#1f2937;">${title}</p>
+              <p style="margin:0 0 4px 0;font-size:14px;line-height:1.6;color:#4b5563;">Scheduled: ${scheduledStr}</p>
+              ${durationStr ? `<p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Duration: ${durationStr}</p>` : ''}
+              <p style="margin:12px 0 0 0;font-size:14px;line-height:1.6;color:#4b5563;">No login required. Use the button below to join with your name and allow camera or microphone.</p>
+            </td>
+          </tr>
+          <tr>
+            <td align="center" style="padding:8px 32px 24px 32px;">
+              <a href="${publicMeetingUrl}" style="display:inline-block;padding:12px 24px;background-color:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Join Meeting</a>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
+              <p style="margin:0 0 8px 0;">If the button does not work, copy and paste this link into your browser:</p>
+              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${publicMeetingUrl}" style="color:#2563eb;text-decoration:none;">${publicMeetingUrl}</a></p>
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
+              <p style="margin:0 0 4px 0;">This email was sent by Dharwin Business Solutions.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+  `;
+
+  await sendEmail(to, subject, text, html);
+};
+
 export {
   transport,
   sendEmail,
@@ -361,5 +437,6 @@ export {
   sendVerificationEmail,
   sendCandidateInvitationEmail,
   sendCandidateProfileShareEmail,
+  sendMeetingInvitationEmail,
 };
 

@@ -88,4 +88,33 @@ const getRecordingStatus = catchAsync(async (req, res) => {
   res.status(httpStatus.OK).json(result);
 });
 
-export { getToken, startRecording, stopRecording, getRecordingStatus };
+/**
+ * Generate LiveKit access token (public, no auth)
+ * POST /v1/public/livekit-token
+ * Body: { roomName, participantName }
+ */
+const getTokenPublic = catchAsync(async (req, res) => {
+  const { roomName, participantName } = req.body;
+
+  if (!roomName) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'roomName is required');
+  }
+
+  const name = participantName?.trim() || 'Guest';
+  const participantIdentity = `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+  const token = await livekitService.generateAccessToken({
+    roomName,
+    participantName: name,
+    participantIdentity,
+  });
+
+  res.status(httpStatus.OK).json({
+    token,
+    roomName,
+    participantName: name,
+    participantIdentity,
+  });
+});
+
+export { getToken, startRecording, stopRecording, getRecordingStatus, getTokenPublic };

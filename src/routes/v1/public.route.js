@@ -2,6 +2,8 @@ import express from 'express';
 import validate from '../../middlewares/validate.js';
 import * as authValidation from '../../validations/auth.validation.js';
 import * as authController from '../../controllers/auth.controller.js';
+import * as livekitValidation from '../../validations/livekit.validation.js';
+import * as livekitController from '../../controllers/livekit.controller.js';
 
 const router = express.Router();
 
@@ -19,5 +21,11 @@ router.post('/register', validate(authValidation.register), authController.publi
  * linked to that user so they appear in the ATS candidate list.
  */
 router.post('/register-candidate', validate(authValidation.registerCandidate), authController.publicRegisterCandidate);
+
+/**
+ * POST /v1/public/livekit-token
+ * Public LiveKit token (no auth). Body: { roomName, participantName }
+ */
+router.post('/livekit-token', validate(livekitValidation.getToken), livekitController.getTokenPublic);
 
 export default router;
