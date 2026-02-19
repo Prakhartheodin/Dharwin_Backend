@@ -192,11 +192,9 @@ const removeParticipant = catchAsync(async (req, res) => {
 /**
  * Get waiting participants for a room (public, no auth)
  * GET /v1/public/waiting-participants/:roomName
- * Query params: ?hostEmail=email@example.com (to verify host status)
  */
 const getWaitingParticipantsPublic = catchAsync(async (req, res) => {
   const { roomName } = req.params;
-  const { hostEmail } = req.query;
 
   if (!roomName) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'roomName is required');

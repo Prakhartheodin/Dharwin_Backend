@@ -8,6 +8,7 @@ import {
   EgressStatus,
 } from 'livekit-server-sdk';
 import config from '../config/config.js';
+import logger from '../config/logger.js';
 import ApiError from '../utils/ApiError.js';
 import httpStatus from 'http-status';
 import { getMeetingByMeetingId } from './meeting.service.js';
@@ -20,7 +21,7 @@ const apiSecret = config.livekit?.apiSecret;
 
 // Debug logging (remove in production)
 if (!apiKey || !apiSecret) {
-  console.warn('LiveKit credentials not configured:', {
+  logger.warn('LiveKit credentials not configured:', {
     hasApiKey: !!apiKey,
     hasApiSecret: !!apiSecret,
     livekitConfig: config.livekit,
@@ -37,9 +38,9 @@ if (apiKey && apiSecret) {
   try {
     egressClient = new EgressClient(livekitUrl, apiKey, apiSecret);
     roomService = new RoomServiceClient(livekitUrl, apiKey, apiSecret);
-    console.log('LiveKit clients initialized successfully');
+    logger.info('LiveKit clients initialized successfully');
   } catch (error) {
-    console.warn('Failed to initialize LiveKit clients:', error);
+    logger.warn('Failed to initialize LiveKit clients:', error);
   }
 }
 
@@ -60,7 +61,7 @@ const isParticipantHost = async (roomName, participantEmail) => {
     const emailLower = participantEmail?.toLowerCase().trim();
     return meeting.hosts?.some(host => host.email?.toLowerCase().trim() === emailLower) || false;
   } catch (error) {
-    console.error('Error checking host status:', error);
+    logger.error('Error checking host status:', error);
     return false;
   }
 };
