@@ -3,7 +3,7 @@ import { objectId } from './custom.validation.js';
 
 const hostSchema = Joi.object({
   nameOrRole: Joi.string().allow('', null).trim(),
-  email: Joi.string().email().required(),
+  email: Joi.string().trim().email().required(),
 });
 
 // id can be a MongoDB ObjectId or any string (e.g. mock/legacy ids from dropdowns)
@@ -33,7 +33,9 @@ const createMeeting = {
       maxParticipants: Joi.number().integer().min(1).max(100).default(10),
       allowGuestJoin: Joi.boolean().default(true),
       requireApproval: Joi.boolean().default(false),
-      hosts: Joi.array().items(hostSchema).default([]),
+      hosts: Joi.array().items(hostSchema).min(1).required().messages({
+        'array.min': 'At least one host with email is required',
+      }),
       emailInvites: Joi.array().items(Joi.string().email()).default([]),
       jobPosition: Joi.string().allow('', null).trim(),
       interviewType: Joi.string().valid('Video', 'In-Person', 'Phone').default('Video'),
@@ -54,15 +56,17 @@ const getMeetings = {
   }),
 };
 
+// id can be MongoDB ObjectId or meetingId string (e.g. meeting_xxx)
 const getMeeting = {
   params: Joi.object().keys({
-    id: Joi.string().required().custom(objectId),
+    id: Joi.string().required().trim().min(1),
   }),
 };
 
+// id can be MongoDB ObjectId or meetingId string (e.g. meeting_xxx)
 const updateMeeting = {
   params: Joi.object().keys({
-    id: Joi.string().required().custom(objectId),
+    id: Joi.string().required().trim().min(1),
   }),
   body: Joi.object()
     .keys({
@@ -82,6 +86,7 @@ const updateMeeting = {
       recruiter: recruiterRefSchema.allow(null),
       notes: Joi.string().allow('', null).trim(),
       status: Joi.string().valid('scheduled', 'ended', 'cancelled'),
+      interviewResult: Joi.string().valid('pending', 'selected', 'rejected'),
     })
     .min(1),
 };
@@ -105,6 +110,16 @@ const getMeetingRecordings = {
   }),
 };
 
+// Public: end meeting when host leaves (body: roomName, hostEmail)
+const endMeetingByRoomPublic = {
+  body: Joi.object()
+    .keys({
+      roomName: Joi.string().required().trim(),
+      hostEmail: Joi.string().email().required(),
+    })
+    .required(),
+};
+
 export {
   createMeeting,
   getMeetings,
@@ -113,4 +128,5 @@ export {
   updateMeeting,
   deleteMeeting,
   resendInvitations,
+  endMeetingByRoomPublic,
 };

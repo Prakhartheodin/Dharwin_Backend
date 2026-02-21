@@ -94,15 +94,17 @@ const queryMeetings = async (filter, options) => {
 };
 
 /**
- * Get meeting by id
- * @param {ObjectId} id
+ * Get meeting by id (MongoDB ObjectId or meetingId string)
+ * @param {string} id - MongoDB ObjectId (24 hex) or meetingId (e.g. meeting_xxx)
  * @returns {Promise<Meeting|null>}
  */
 const getMeetingById = async (id) => {
-  const meeting = await Meeting.findById(id).populate('createdBy');
+  const meeting = await resolveMeetingByIdOrMeetingId(id);
   if (!meeting) return null;
-  const doc = meeting.toJSON();
-  doc.publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
+  const populated = await Meeting.findById(meeting._id).populate('createdBy');
+  if (!populated) return null;
+  const doc = populated.toJSON();
+  doc.publicMeetingUrl = getPublicMeetingUrl(populated.meetingId);
   return doc;
 };
 
@@ -120,19 +122,33 @@ const getMeetingByMeetingId = async (meetingId) => {
 };
 
 /**
- * Update meeting by id
- * @param {ObjectId} id
+ * Resolve id (MongoDB ObjectId or meetingId string) to a meeting document
+ * @param {string} id - MongoDB ObjectId (24 hex) or meetingId (e.g. meeting_xxx)
+ * @returns {Promise<Meeting|null>}
+ */
+const resolveMeetingByIdOrMeetingId = async (id) => {
+  if (!id || typeof id !== 'string') return null;
+  const trimmed = id.trim();
+  if (/^[0-9a-fA-F]{24}$/.test(trimmed)) {
+    return Meeting.findById(trimmed);
+  }
+  return Meeting.findOne({ meetingId: trimmed });
+};
+
+/**
+ * Update meeting by id (MongoDB ObjectId or meetingId string)
+ * @param {string} id - MongoDB ObjectId or meetingId
  * @param {Object} updateBody
  * @returns {Promise<Meeting>}
  */
 const updateMeetingById = async (id, updateBody) => {
-  const meeting = await Meeting.findById(id);
+  const meeting = await resolveMeetingByIdOrMeetingId(id);
   if (!meeting) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Meeting not found');
   }
   Object.assign(meeting, updateBody);
   await meeting.save();
-  return getMeetingById(id);
+  return getMeetingById(meeting._id.toString());
 };
 
 /**
@@ -182,6 +198,29 @@ const resendMeetingInvitations = async (id) => {
   return { sent };
 };
 
+/**
+ * End meeting by room name (public: host only by email)
+ * @param {string} roomName - meetingId (room name)
+ * @param {string} hostEmail - Email of the participant leaving (must be a host)
+ * @returns {Promise<Meeting>}
+ */
+const endMeetingByRoomPublic = async (roomName, hostEmail) => {
+  const meeting = await Meeting.findOne({ meetingId: roomName });
+  if (!meeting) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Meeting not found');
+  }
+  const emailLower = (hostEmail || '').toLowerCase().trim();
+  const isHost = meeting.hosts?.some((h) => (h.email || '').toLowerCase().trim() === emailLower);
+  if (!isHost) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only a host can end the meeting');
+  }
+  meeting.status = 'ended';
+  await meeting.save();
+  const doc = meeting.toJSON();
+  doc.publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
+  return doc;
+};
+
 export {
   createMeeting,
   queryMeetings,
@@ -191,4 +230,5 @@ export {
   deleteMeetingById,
   resendMeetingInvitations,
   getPublicMeetingUrl,
+  endMeetingByRoomPublic,
 };

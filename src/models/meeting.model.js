@@ -100,6 +100,12 @@ const meetingSchema = mongoose.Schema(
       enum: ['scheduled', 'ended', 'cancelled'],
       default: 'scheduled',
     },
+    /** Interview result: pending (not decided), selected, rejected */
+    interviewResult: {
+      type: String,
+      enum: ['pending', 'selected', 'rejected'],
+      default: 'pending',
+    },
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',

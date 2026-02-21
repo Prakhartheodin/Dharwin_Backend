@@ -4,6 +4,8 @@ import * as authValidation from '../../validations/auth.validation.js';
 import * as authController from '../../controllers/auth.controller.js';
 import * as livekitValidation from '../../validations/livekit.validation.js';
 import * as livekitController from '../../controllers/livekit.controller.js';
+import * as meetingValidation from '../../validations/meeting.validation.js';
+import * as meetingController from '../../controllers/meeting.controller.js';
 
 const router = express.Router();
 
@@ -89,6 +91,16 @@ router.get(
   '/recording/status/:roomName',
   validate(livekitValidation.getRecordingStatusPublic),
   livekitController.getRecordingStatusPublic
+);
+
+/**
+ * POST /v1/public/meetings/end
+ * When host leaves: mark meeting as ended. Body: { roomName, hostEmail } – host only
+ */
+router.post(
+  '/meetings/end',
+  validate(meetingValidation.endMeetingByRoomPublic),
+  meetingController.endMeetingByRoomPublic
 );
 
 export default router;

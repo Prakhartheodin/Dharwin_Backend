@@ -45,4 +45,10 @@ const getRecordings = catchAsync(async (req, res) => {
   res.send(list);
 });
 
-export { create, list, get, update, remove, resendInvitations, getRecordings };
+const endMeetingByRoomPublic = catchAsync(async (req, res) => {
+  const { roomName, hostEmail } = req.body;
+  const result = await meetingService.endMeetingByRoomPublic(roomName, hostEmail);
+  res.send(result);
+});
+
+export { create, list, get, update, remove, resendInvitations, getRecordings, endMeetingByRoomPublic };
