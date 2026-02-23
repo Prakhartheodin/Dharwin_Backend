@@ -6,6 +6,8 @@ import {
   getJobApplicationById,
   updateJobApplicationStatus,
   queryJobApplications,
+  createJobApplication,
+  deleteJobApplication,
 } from '../services/jobApplication.service.js';
 
 const get = catchAsync(async (req, res) => {
@@ -32,4 +34,14 @@ const list = catchAsync(async (req, res) => {
   res.send(result);
 });
 
-export { get, updateStatus, list };
+const create = catchAsync(async (req, res) => {
+  const application = await createJobApplication(req.body, req.user);
+  res.status(httpStatus.CREATED).send(application);
+});
+
+const remove = catchAsync(async (req, res) => {
+  await deleteJobApplication(req.params.applicationId, req.user);
+  res.status(httpStatus.NO_CONTENT).send();
+});
+
+export { get, updateStatus, list, create, remove };

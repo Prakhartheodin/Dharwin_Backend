@@ -14,6 +14,12 @@ router
     requirePermissions('candidates.read'),
     validate(jobApplicationValidation.getJobApplications),
     jobApplicationController.list
+  )
+  .post(
+    auth(),
+    requirePermissions('candidates.manage'),
+    validate(jobApplicationValidation.createJobApplication),
+    jobApplicationController.create
   );
 
 router
@@ -29,6 +35,12 @@ router
     requirePermissions('candidates.manage'),
     validate(jobApplicationValidation.updateJobApplicationStatus),
     jobApplicationController.updateStatus
+  )
+  .delete(
+    auth(),
+    requirePermissions('candidates.manage'),
+    validate(jobApplicationValidation.deleteJobApplication),
+    jobApplicationController.remove
   );
 
 export default router;

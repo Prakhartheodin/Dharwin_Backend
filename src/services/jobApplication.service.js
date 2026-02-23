@@ -1,5 +1,6 @@
 import httpStatus from 'http-status';
 import JobApplication from '../models/jobApplication.model.js';
+import Candidate from '../models/candidate.model.js';
 import { getJobById, isOwnerOrAdmin } from './job.service.js';
 import ApiError from '../utils/ApiError.js';
 
@@ -19,9 +20,48 @@ const getJobApplicationById = async (id) => {
 };
 
 /**
- * Update job application status (and optionally notes)
+ * Create a job application
+ * @param {Object} body - { job, candidate, status?, coverLetter?, notes? }
+ * @param {Object} currentUser
+ * @returns {Promise<JobApplication>}
+ */
+const createJobApplication = async (body, currentUser) => {
+  const job = await getJobById(body.job);
+  if (!job) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Job not found');
+  }
+  const canAccess = await isOwnerOrAdmin(currentUser, job);
+  if (!canAccess) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'You do not have access to this job');
+  }
+  const candidate = await Candidate.findById(body.candidate);
+  if (!candidate) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Candidate not found');
+  }
+  const existing = await JobApplication.findOne({ job: body.job, candidate: body.candidate });
+  if (existing) {
+    throw new ApiError(httpStatus.CONFLICT, 'This candidate has already applied to this job');
+  }
+  const application = await JobApplication.create({
+    job: body.job,
+    candidate: body.candidate,
+    status: body.status || 'Applied',
+    coverLetter: body.coverLetter,
+    notes: body.notes,
+    appliedBy: currentUser.id,
+  });
+  await application.populate([
+    { path: 'job', select: 'title organisation status' },
+    { path: 'candidate', select: 'fullName email phoneNumber' },
+    { path: 'appliedBy', select: 'name email' },
+  ]);
+  return application;
+};
+
+/**
+ * Update job application (status, notes, coverLetter, job, candidate)
  * @param {ObjectId} id - Application id
- * @param {Object} updateBody - { status, notes? }
+ * @param {Object} updateBody - { status?, notes?, coverLetter?, job?, candidate? }
  * @param {Object} currentUser
  * @returns {Promise<JobApplication>}
  */
@@ -37,7 +77,35 @@ const updateJobApplicationStatus = async (id, updateBody, currentUser) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
 
-  const { status, notes } = updateBody;
+  const { status, notes, coverLetter, job: jobId, candidate: candidateId } = updateBody;
+
+  if (jobId != null && jobId !== undefined) {
+    const newJob = await getJobById(jobId);
+    if (!newJob) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Job not found');
+    }
+    const canAccessNew = await isOwnerOrAdmin(currentUser, newJob);
+    if (!canAccessNew) {
+      throw new ApiError(httpStatus.FORBIDDEN, 'You do not have access to that job');
+    }
+    application.job = jobId;
+  }
+  if (candidateId != null && candidateId !== undefined) {
+    const candidate = await Candidate.findById(candidateId);
+    if (!candidate) {
+      throw new ApiError(httpStatus.NOT_FOUND, 'Candidate not found');
+    }
+    application.candidate = candidateId;
+  }
+  // If job or candidate changed, check unique (job, candidate)
+  const existing = await JobApplication.findOne({
+    job: application.job,
+    candidate: application.candidate,
+    _id: { $ne: application._id },
+  });
+  if (existing) {
+    throw new ApiError(httpStatus.CONFLICT, 'This candidate has already applied to this job');
+  }
 
   if (status != null && status !== undefined) {
     if (!STATUS_VALUES.includes(status)) {
@@ -45,9 +113,11 @@ const updateJobApplicationStatus = async (id, updateBody, currentUser) => {
     }
     application.status = status;
   }
-
   if (notes !== undefined) {
     application.notes = notes;
+  }
+  if (coverLetter !== undefined) {
+    application.coverLetter = coverLetter;
   }
 
   await application.save();
@@ -58,6 +128,25 @@ const updateJobApplicationStatus = async (id, updateBody, currentUser) => {
   ]);
 
   return application;
+};
+
+/**
+ * Delete job application
+ * @param {ObjectId} id
+ * @param {Object} currentUser
+ * @returns {Promise<void>}
+ */
+const deleteJobApplication = async (id, currentUser) => {
+  const application = await JobApplication.findById(id);
+  if (!application) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Job application not found');
+  }
+  const job = await getJobById(application.job);
+  const canAccess = await isOwnerOrAdmin(currentUser, job);
+  if (!canAccess) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
+  }
+  await JobApplication.findByIdAndDelete(id);
 };
 
 /**
@@ -114,5 +203,7 @@ export {
   getJobApplicationById,
   updateJobApplicationStatus,
   queryJobApplications,
+  createJobApplication,
+  deleteJobApplication,
   STATUS_VALUES,
 };
