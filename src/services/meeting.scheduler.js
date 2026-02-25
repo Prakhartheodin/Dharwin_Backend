@@ -16,12 +16,24 @@ const runAutoEndMeetings = async () => {
   }
 };
 
+const runUpcomingMeetingReminders = async () => {
+  try {
+    await meetingService.sendUpcomingMeetingReminders();
+  } catch (err) {
+    logger.error('[Meeting scheduler] Upcoming reminders failed:', err?.message || err);
+  }
+};
+
 export const startMeetingScheduler = () => {
   if (intervalId) return;
   const intervalMinutes = Math.max(1, Number(process.env.MEETING_SCHEDULER_INTERVAL_MINUTES) || DEFAULT_INTERVAL_MINUTES);
   const intervalMs = intervalMinutes * 60 * 1000;
   runAutoEndMeetings();
-  intervalId = setInterval(runAutoEndMeetings, intervalMs);
+  runUpcomingMeetingReminders();
+  intervalId = setInterval(() => {
+    runAutoEndMeetings();
+    runUpcomingMeetingReminders();
+  }, intervalMs);
   logger.info(`[Meeting scheduler] Started (interval: ${intervalMinutes} min)`);
 };
 

@@ -127,6 +127,17 @@ const updateJobApplicationStatus = async (id, updateBody, currentUser) => {
     { path: 'appliedBy', select: 'name email' },
   ]);
 
+  if (status != null && status !== undefined && application.candidate?.email) {
+    const { notifyByEmail } = await import('./notification.service.js');
+    const jobTitle = application.job?.title || 'Job';
+    notifyByEmail(application.candidate.email, {
+      type: 'job_application',
+      title: `Application status: ${application.status}`,
+      message: `Your application for "${jobTitle}" is now ${application.status}.`,
+      link: '/ats/my-profile',
+    }).catch(() => {});
+  }
+
   return application;
 };
 

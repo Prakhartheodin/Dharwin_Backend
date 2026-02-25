@@ -295,6 +295,14 @@ const approveBackdatedAttendanceRequest = async (requestId, adminComment, user) 
     );
   }
 
+  const { notifyByEmail } = await import('./notification.service.js');
+  notifyByEmail(request.studentEmail, {
+    type: 'leave',
+    title: 'Backdated attendance request approved',
+    message: adminComment ? `Your request was approved. Comment: ${adminComment}` : 'Your backdated attendance request was approved.',
+    link: '/settings/attendance/backdated-attendance-requests',
+  }).catch(() => {});
+
   return {
     success: true,
     message: `Backdated attendance request approved. ${createdOrUpdatedAttendances.length} attendance record(s) created/updated successfully${errors.length > 0 ? `, ${errors.length} failed` : ''}`,
@@ -332,6 +340,14 @@ const rejectBackdatedAttendanceRequest = async (requestId, adminComment, user) =
   request.reviewedBy = user.id;
   request.reviewedAt = new Date();
   await request.save();
+
+  const { notifyByEmail } = await import('./notification.service.js');
+  notifyByEmail(request.studentEmail, {
+    type: 'leave',
+    title: 'Backdated attendance request rejected',
+    message: adminComment ? `Your request was not approved. Comment: ${adminComment}` : 'Your backdated attendance request was rejected.',
+    link: '/settings/attendance/backdated-attendance-requests',
+  }).catch(() => {});
 
   return request
     .populate('student', 'user')

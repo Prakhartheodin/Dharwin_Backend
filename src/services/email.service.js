@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import config from '../config/config.js';
 import logger from '../config/logger.js';
+import EmailLog from '../models/emailLog.model.js';
 
 
 const transport = nodemailer.createTransport(config.email.smtp);
@@ -13,21 +14,67 @@ if (config.env !== 'test') {
 }
 
 /**
- * Send an email
+ * Build branded email HTML wrapper (header + body + footer).
+ * @param {string} badgeText - Text shown in top-right of header (e.g. "Secure Password Reset")
+ * @param {string} bodyHTML - Inner table rows (content between header and footer)
+ * @returns {string} Full HTML email
+ */
+const buildEmailHTML = (badgeText, bodyHTML) => `
+  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
+    <tr>
+      <td align="center">
+        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
+          <tr>
+            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
+              <table width="100%" cellpadding="0" cellspacing="0">
+                <tr>
+                  <td align="left" style="font-size:20px;font-weight:600;">Dharwin Business Solutions</td>
+                  <td align="right" style="font-size:13px;opacity:0.9;">${badgeText}</td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          ${bodyHTML}
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
+              <p style="margin:0 0 4px 0;">This email was sent by Dharwin Business Solutions. Please do not reply to this automated message.</p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+`;
+
+/**
+ * Send an email and log to EmailLog for audit.
  * @param {string} to
  * @param {string} subject
  * @param {string} text
  * @param {string} [html]
+ * @param {string} [templateName] - Optional template name for audit (e.g. 'resetPassword')
+ * @param {Object} [metadata] - Optional metadata for audit
  * @returns {Promise}
  */
-const sendEmail = async (to, subject, text, html) => {
-  // Show branded name before email address in email clients
+const sendEmail = async (to, subject, text, html, templateName = null, metadata = {}) => {
+  let logEntry = null;
+  try {
+    logEntry = await EmailLog.create({
+      to: String(to).trim().toLowerCase(),
+      subject,
+      templateName: templateName || null,
+      status: 'pending',
+      metadata,
+    });
+  } catch (logErr) {
+    logger.warn(`EmailLog create failed: ${logErr?.message || logErr}`);
+  }
+
   const fromAddress = config.email.from;
   const from =
     fromAddress && fromAddress.includes('<')
       ? fromAddress
       : `Dharwin Business Solutions <${fromAddress}>`;
-  // Default reply-to to the admin support address, overrideable via EMAIL_REPLY_TO
   const replyTo = config.email.replyTo || 'admin@dharwinbusinesssolutions.com' || fromAddress;
 
   const msg = {
@@ -38,7 +85,70 @@ const sendEmail = async (to, subject, text, html) => {
     text,
     ...(html && { html }),
   };
-  await transport.sendMail(msg);
+
+  const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  const maxAttempts = 3;
+  const backoffMs = [1000, 2000, 4000];
+  let lastErr;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    try {
+      await transport.sendMail(msg);
+      if (logEntry) {
+        await EmailLog.findByIdAndUpdate(logEntry._id, {
+          status: 'sent',
+          sentAt: new Date(),
+        });
+      }
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt < maxAttempts - 1) {
+        await delay(backoffMs[attempt]);
+      }
+    }
+  }
+  if (logEntry) {
+    await EmailLog.findByIdAndUpdate(logEntry._id, {
+      status: 'failed',
+      error: lastErr?.message || String(lastErr),
+    }).catch(() => {});
+  }
+  throw lastErr;
+};
+
+/** In-memory queue for bulk emails; drained with concurrency limit to avoid overwhelming SMTP. */
+const emailQueue = [];
+const QUEUE_CONCURRENCY = 5;
+let queueProcessing = false;
+
+const processEmailQueue = async () => {
+  if (queueProcessing || emailQueue.length === 0) return;
+  queueProcessing = true;
+  while (emailQueue.length > 0) {
+    const batch = emailQueue.splice(0, QUEUE_CONCURRENCY);
+    await Promise.all(
+      batch.map((job) =>
+        sendEmail(job.to, job.subject, job.text, job.html, job.templateName, job.metadata).catch(
+          (err) => logger.warn(`Queued email to ${job.to} failed: ${err?.message || err}`)
+        )
+      )
+    );
+  }
+  queueProcessing = false;
+};
+
+/**
+ * Queue an email for throttled sending (use for bulk operations). Auth-critical emails should use sendEmail directly.
+ * @param {string} to
+ * @param {string} subject
+ * @param {string} text
+ * @param {string} [html]
+ * @param {string} [templateName]
+ * @param {Object} [metadata]
+ */
+const queueEmail = (to, subject, text, html, templateName = null, metadata = {}) => {
+  emailQueue.push({ to, subject, text, html, templateName, metadata });
+  processEmailQueue();
 };
 
 /**
@@ -57,73 +167,27 @@ To reset your password, click on this link: ${resetPasswordUrl}
 
 If you did not request any password resets, then ignore this email.`;
 
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
-          <tr>
-            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="left" style="font-size:20px;font-weight:600;">
-                    Dharwin Business Solutions
-                  </td>
-                  <td align="right" style="font-size:13px;opacity:0.9;">
-                    Secure Password Reset
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+  const bodyHTML = `
           <tr>
             <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">
-                Password Reset Request
-              </h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
-                Hello,
-              </p>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
-                We received a request to reset the password for your Dharwin account.
-                If you made this request, please click the button below to choose a new password.
-              </p>
+              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Password Reset Request</h1>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Hello,</p>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">We received a request to reset the password for your Dharwin account. If you made this request, please click the button below to choose a new password.</p>
             </td>
           </tr>
           <tr>
             <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${resetPasswordUrl}"
-                 style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">
-                Reset My Password
-              </a>
+              <a href="${resetPasswordUrl}" style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Reset My Password</a>
             </td>
           </tr>
           <tr>
             <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">
-                If the button above does not work, copy and paste this link into your browser:
-              </p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;">
-                <a href="${resetPasswordUrl}" style="color:#2563eb;text-decoration:none;">${resetPasswordUrl}</a>
-              </p>
-              <p style="margin:0 0 4px 0;">
-                For your security, this link will expire after a short time. If you did not request a password reset, you can safely ignore this email and your password will remain unchanged.
-              </p>
+              <p style="margin:0 0 8px 0;">If the button above does not work, copy and paste this link into your browser:</p>
+              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${resetPasswordUrl}" style="color:#2563eb;text-decoration:none;">${resetPasswordUrl}</a></p>
+              <p style="margin:0 0 4px 0;">For your security, this link will expire after a short time. If you did not request a password reset, you can safely ignore this email and your password will remain unchanged.</p>
             </td>
-          </tr>
-          <tr>
-            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
-              <p style="margin:0 0 4px 0;">
-                This email was sent by Dharwin Business Solutions. Please do not reply to this automated message.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-  `;
-
+          </tr>`;
+  const html = buildEmailHTML('Secure Password Reset', bodyHTML);
   await sendEmail(to, subject, text, html);
 };
 
@@ -143,72 +207,27 @@ To verify your email, click on this link: ${verificationEmailUrl}
 
 If you did not create an account, then ignore this email.`;
 
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
-          <tr>
-            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="left" style="font-size:20px;font-weight:600;">
-                    Dharwin Business Solutions
-                  </td>
-                  <td align="right" style="font-size:13px;opacity:0.9;">
-                    Email Verification
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+  const bodyHTML = `
           <tr>
             <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">
-                Confirm your email address
-              </h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
-                Hello,
-              </p>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
-                Thank you for creating a Dharwin account. Please confirm your email address by clicking the button below.
-              </p>
+              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Confirm your email address</h1>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Hello,</p>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Thank you for creating a Dharwin account. Please confirm your email address by clicking the button below.</p>
             </td>
           </tr>
           <tr>
             <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${verificationEmailUrl}"
-                 style="display:inline-block;padding:12px 24px;background-color:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">
-                Verify Email
-              </a>
+              <a href="${verificationEmailUrl}" style="display:inline-block;padding:12px 24px;background-color:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Verify Email</a>
             </td>
           </tr>
           <tr>
             <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">
-                If the button above does not work, copy and paste this link into your browser:
-              </p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;">
-                <a href="${verificationEmailUrl}" style="color:#2563eb;text-decoration:none;">${verificationEmailUrl}</a>
-              </p>
-              <p style="margin:0 0 4px 0;">
-                If you did not create an account, you can safely ignore this email.
-              </p>
+              <p style="margin:0 0 8px 0;">If the button above does not work, copy and paste this link into your browser:</p>
+              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${verificationEmailUrl}" style="color:#2563eb;text-decoration:none;">${verificationEmailUrl}</a></p>
+              <p style="margin:0 0 4px 0;">If you did not create an account, you can safely ignore this email.</p>
             </td>
-          </tr>
-          <tr>
-            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
-              <p style="margin:0 0 4px 0;">
-                This email was sent by Dharwin Business Solutions. Please do not reply to this automated message.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-  `;
-
+          </tr>`;
+  const html = buildEmailHTML('Email Verification', bodyHTML);
   await sendEmail(to, subject, text, html);
 };
 
@@ -231,21 +250,7 @@ This link will expire in 24 hours. If you have any questions, please contact you
 Best regards,
 Dharwin Business Solutions`;
 
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
-          <tr>
-            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="left" style="font-size:20px;font-weight:600;">Dharwin Business Solutions</td>
-                  <td align="right" style="font-size:13px;opacity:0.9;">Pre-boarding Invitation</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+  const bodyHTML = `
           <tr>
             <td style="padding:28px 32px 12px 32px;color:#111827;">
               <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Complete Your Onboarding</h1>
@@ -263,18 +268,8 @@ Dharwin Business Solutions`;
               <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${onboardUrl}" style="color:#2563eb;text-decoration:none;">${onboardUrl}</a></p>
               <p style="margin:0 0 4px 0;">This link expires in 24 hours.</p>
             </td>
-          </tr>
-          <tr>
-            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
-              <p style="margin:0 0 4px 0;">This email was sent by Dharwin Business Solutions.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-  `;
-
+          </tr>`;
+  const html = buildEmailHTML('Pre-boarding Invitation', bodyHTML);
   await sendEmail(to, subject, text, html);
 };
 
@@ -373,69 +368,26 @@ Sign in here: ${signInUrl}
 
 If you have any questions, please contact support.`;
 
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
-          <tr>
-            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="left" style="font-size:20px;font-weight:600;">
-                    Dharwin Business Solutions
-                  </td>
-                  <td align="right" style="font-size:13px;opacity:0.9;">
-                    Account Activated
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+  const bodyHTML = `
           <tr>
             <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">
-                Your Account Is Ready
-              </h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
-                Hello ${displayName},
-              </p>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">
-                Your account has been activated by an administrator. You can now sign in and access your profile.
-              </p>
+              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Your Account Is Ready</h1>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Hello ${displayName},</p>
+              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Your account has been activated by an administrator. You can now sign in and access your profile.</p>
             </td>
           </tr>
           <tr>
             <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${signInUrl}"
-                 style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">
-                Sign In Now
-              </a>
+              <a href="${signInUrl}" style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Sign In Now</a>
             </td>
           </tr>
           <tr>
             <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">
-                If the button above does not work, copy and paste this link into your browser:
-              </p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;">
-                <a href="${signInUrl}" style="color:#2563eb;text-decoration:none;">${signInUrl}</a>
-              </p>
+              <p style="margin:0 0 8px 0;">If the button above does not work, copy and paste this link into your browser:</p>
+              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${signInUrl}" style="color:#2563eb;text-decoration:none;">${signInUrl}</a></p>
             </td>
-          </tr>
-          <tr>
-            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
-              <p style="margin:0 0 4px 0;">
-                This email was sent by Dharwin Business Solutions. Please do not reply to this automated message.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-  `;
-
+          </tr>`;
+  const html = buildEmailHTML('Account Activated', bodyHTML);
   await sendEmail(to, subject, text, html);
 };
 
@@ -463,21 +415,7 @@ Join here: ${publicMeetingUrl}
 Best regards,
 Dharwin Business Solutions`;
 
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
-          <tr>
-            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="left" style="font-size:20px;font-weight:600;">Dharwin Business Solutions</td>
-                  <td align="right" style="font-size:13px;opacity:0.9;">Meeting Invitation</td>
-                </tr>
-              </table>
-            </td>
-          </tr>
+  const bodyHTML = `
           <tr>
             <td style="padding:28px 32px 12px 32px;color:#111827;">
               <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">${title || 'Meeting Invitation'}</h1>
@@ -496,18 +434,8 @@ Dharwin Business Solutions`;
               <p style="margin:0 0 8px 0;">If the button does not work, copy and paste this link into your browser:</p>
               <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${publicMeetingUrl}" style="color:#2563eb;text-decoration:none;">${publicMeetingUrl}</a></p>
             </td>
-          </tr>
-          <tr>
-            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
-              <p style="margin:0 0 4px 0;">This email was sent by Dharwin Business Solutions.</p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-  `;
-
+          </tr>`;
+  const html = buildEmailHTML('Meeting Invitation', bodyHTML);
   await sendEmail(to, subject, text, html);
 };
 
@@ -542,6 +470,7 @@ const sendJobShareEmail = async (to, job, customMessage = '') => {
 export {
   transport,
   sendEmail,
+  queueEmail,
   sendResetPasswordEmail,
   sendVerificationEmail,
   sendCandidateInvitationEmail,

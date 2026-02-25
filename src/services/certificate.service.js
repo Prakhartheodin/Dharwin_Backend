@@ -94,7 +94,19 @@ const generateCertificate = async (studentId, moduleId) => {
     certificateUrl: certificate.certificateUrl || '', // Will be updated when PDF is generated
   };
   await progress.save();
-  
+
+  const studentDoc = await Student.findById(studentId).select('user').lean();
+  const userId = studentDoc?.user;
+  if (userId) {
+    const { notify } = await import('./notification.service.js');
+    notify(userId, {
+      type: 'certificate',
+      title: 'Certificate issued',
+      message: `You have earned a certificate for "${module.moduleName}".`,
+      link: '/training/curriculum/modules',
+    }).catch(() => {});
+  }
+
   return certificate;
 };
 

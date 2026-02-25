@@ -1,6 +1,8 @@
 import httpStatus from 'http-status';
 import ApiError from '../utils/ApiError.js';
 import TrainingModule from '../models/trainingModule.model.js';
+import Student from '../models/student.model.js';
+import Mentor from '../models/mentor.model.js';
 import { uploadFileToS3 } from './upload.service.js';
 import { generatePresignedDownloadUrl } from '../config/s3.js';
 
@@ -284,6 +286,9 @@ const updateTrainingModuleById = async (moduleId, updateBody, currentUser) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Training module not found');
   }
 
+  const oldStudentIds = new Set((module.students || []).map((s) => String(s._id || s)));
+  const oldMentorIds = new Set((module.mentorsAssigned || []).map((m) => String(m._id || m)));
+
   // Handle cover image upload if new file provided
   if (updateBody.coverImageFile) {
     const uploadResult = await uploadFileToS3(
@@ -437,7 +442,44 @@ const updateTrainingModuleById = async (moduleId, updateBody, currentUser) => {
   Object.assign(module, updateBody);
   await module.save();
 
-  return getTrainingModuleById(moduleId);
+  const updated = await getTrainingModuleById(moduleId);
+  const newStudentIds = new Set((updated.students || []).map((s) => String(s._id || s)));
+  const newMentorIds = new Set((updated.mentorsAssigned || []).map((m) => String(m._id || m)));
+  const addedStudents = [...newStudentIds].filter((id) => !oldStudentIds.has(id));
+  const removedStudents = [...oldStudentIds].filter((id) => !newStudentIds.has(id));
+  const addedMentors = [...newMentorIds].filter((id) => !oldMentorIds.has(id));
+  const removedMentors = [...oldMentorIds].filter((id) => !newMentorIds.has(id));
+
+  const moduleName = updated.moduleName || module.moduleName || 'Training module';
+  const link = '/training/curriculum/modules';
+  const { notify } = await import('./notification.service.js');
+
+  for (const studentId of addedStudents) {
+    const student = await Student.findById(studentId).select('user').lean();
+    if (student?.user) {
+      notify(student.user, { type: 'course', title: 'Course assigned', message: `You have been assigned to "${moduleName}".`, link }).catch(() => {});
+    }
+  }
+  for (const studentId of removedStudents) {
+    const student = await Student.findById(studentId).select('user').lean();
+    if (student?.user) {
+      notify(student.user, { type: 'course', title: 'Removed from course', message: `You have been removed from "${moduleName}".`, link }).catch(() => {});
+    }
+  }
+  for (const mentorId of addedMentors) {
+    const mentor = await Mentor.findById(mentorId).select('user').lean();
+    if (mentor?.user) {
+      notify(mentor.user, { type: 'course', title: 'Mentor assigned', message: `You have been assigned as mentor to "${moduleName}".`, link }).catch(() => {});
+    }
+  }
+  for (const mentorId of removedMentors) {
+    const mentor = await Mentor.findById(mentorId).select('user').lean();
+    if (mentor?.user) {
+      notify(mentor.user, { type: 'course', title: 'Mentor removed', message: `You have been removed as mentor from "${moduleName}".`, link }).catch(() => {});
+    }
+  }
+
+  return updated;
 };
 
 /**

@@ -432,6 +432,13 @@ const shareProfile = catchAsync(async (req, res) => {
     sharedBy: req.user.name
   };
   await sendCandidateProfileShareEmail(email, candidateData, emailShareData);
+  const { notifyByEmail } = await import('../services/notification.service.js');
+  notifyByEmail(email, {
+    type: 'general',
+    title: 'Candidate profile shared with you',
+    message: `${candidateData.candidateName} was shared by ${req.user.name}.`,
+    link: shareResult.publicUrl,
+  }).catch(() => {});
 
   res.status(httpStatus.OK).send({
     success: true,

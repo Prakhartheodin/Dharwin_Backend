@@ -91,6 +91,15 @@ const updateUserById = async (userId, updateBody) => {
     sendCandidateAccountActivationEmail(user.email, user.name).catch((err) => {
       logger.warn(`Failed to send account activation email to ${user.email}: ${err?.message || err}`);
     });
+    const cfg = await import('../config/config.js').then((m) => m.default);
+    const signInUrl = `${(cfg?.frontendBaseUrl || 'http://localhost:3001').replace(/\/$/, '')}/authentication/sign-in/`;
+    const { notify } = await import('./notification.service.js');
+    notify(user.id || user._id, {
+      type: 'account',
+      title: 'Your account has been activated',
+      message: 'You can now sign in.',
+      link: signInUrl,
+    }).catch(() => {});
   }
   // Auto-create Student profile when user gains Student role (avoids 404 on /training/students/me)
   if (user.roleIds?.length) {

@@ -31,6 +31,18 @@ const getUser = {
   }),
 };
 
+const notificationPreferencesSchema = Joi.object({
+  leaveUpdates: Joi.boolean(),
+  taskAssignments: Joi.boolean(),
+  applicationUpdates: Joi.boolean(),
+  offerUpdates: Joi.boolean(),
+  meetingInvitations: Joi.boolean(),
+  meetingReminders: Joi.boolean(),
+  certificates: Joi.boolean(),
+  courseUpdates: Joi.boolean(),
+  recruiterUpdates: Joi.boolean(),
+});
+
 const updateUser = {
   params: Joi.object().keys({
     userId: Joi.required().custom(objectId),
@@ -48,6 +60,7 @@ const updateUser = {
       domain: Joi.array().items(Joi.string().trim()).allow(null),
       location: Joi.string().trim().allow('', null),
       profileSummary: Joi.string().trim().allow('', null),
+      notificationPreferences: notificationPreferencesSchema,
     })
     .min(1),
 };

@@ -152,6 +152,31 @@ const updateOfferById = async (id, updateBody, currentUser, options = {}) => {
       await JobApplication.findByIdAndUpdate(offer.jobApplication, { status: 'Rejected' });
     }
     delete updateBody.status;
+
+    const { notifyByEmail, notify } = await import('./notification.service.js');
+    const jobObj = offer.job && typeof offer.job === 'object' && offer.job.title ? offer.job : await getJobById(offer.job);
+    const jobTitle = jobObj?.title || 'Job';
+    if (newStatus === 'Sent') {
+      const cand = await Candidate.findById(offer.candidate).select('email').lean();
+      if (cand?.email) {
+        notifyByEmail(cand.email, {
+          type: 'offer',
+          title: 'Offer sent to you',
+          message: `An offer for "${jobTitle}" has been sent to you.`,
+          link: '/ats/offers-placement',
+        }).catch(() => {});
+      }
+    } else if (newStatus === 'Accepted' || newStatus === 'Rejected') {
+      const creatorId = offer.createdBy?._id || offer.createdBy;
+      if (creatorId) {
+        notify(creatorId, {
+          type: 'offer',
+          title: `Offer ${newStatus.toLowerCase()}`,
+          message: `The offer for "${jobTitle}" was ${newStatus.toLowerCase()} by the candidate.`,
+          link: '/ats/offers-placement',
+        }).catch(() => {});
+      }
+    }
   }
 
   Object.assign(offer, updateBody);

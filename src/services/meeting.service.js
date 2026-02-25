@@ -90,10 +90,19 @@ const createMeeting = async (body, userId) => {
     durationMinutes: meeting.durationMinutes,
     publicMeetingUrl,
   };
+  const scheduled = meeting.scheduledAt ? new Date(meeting.scheduledAt).toLocaleString() : 'TBD';
   emails.forEach((to) => {
     sendMeetingInvitationEmail(to, payload).catch((err) => {
       logger.warn(`Failed to send meeting invitation to ${to}:`, err?.message || err);
     });
+    import('./notification.service.js').then(({ notifyByEmail }) => {
+      notifyByEmail(to, {
+        type: 'meeting',
+        title: meeting.title || 'Meeting invitation',
+        message: `Scheduled: ${scheduled}`,
+        link: publicMeetingUrl,
+      }).catch(() => {});
+    }).catch(() => {});
   });
 
   return meetingObj;
@@ -352,7 +361,9 @@ const resendMeetingInvitations = async (id) => {
     durationMinutes: meeting.durationMinutes,
     publicMeetingUrl,
   };
+  const scheduled = meeting.scheduledAt ? new Date(meeting.scheduledAt).toLocaleString() : 'TBD';
   let sent = 0;
+  const { notifyByEmail } = await import('./notification.service.js');
   await Promise.all(
     emails.map((to) =>
       sendMeetingInvitationEmail(to, payload)
@@ -364,6 +375,14 @@ const resendMeetingInvitations = async (id) => {
         })
     )
   );
+  emails.forEach((to) => {
+    notifyByEmail(to, {
+      type: 'meeting',
+      title: meeting.title || 'Meeting invitation',
+      message: `Scheduled: ${scheduled}`,
+      link: publicMeetingUrl,
+    }).catch(() => {});
+  });
   return { sent };
 };
 
@@ -447,6 +466,53 @@ const autoEndExpiredMeetings = async () => {
     }
   }
   return count;
+};
+
+const meetingReminderSentIds = new Set();
+
+/**
+ * Send in-app + optional email reminders for meetings starting in ~15 minutes.
+ * Called by meeting scheduler. Tracks sent IDs to avoid duplicate reminders.
+ */
+export const sendUpcomingMeetingReminders = async () => {
+  const now = new Date();
+  const windowStart = new Date(now.getTime() + 10 * 60 * 1000);
+  const windowEnd = new Date(now.getTime() + 20 * 60 * 1000);
+  const meetings = await Meeting.find({
+    status: 'scheduled',
+    scheduledAt: { $gte: windowStart, $lte: windowEnd },
+  })
+    .populate('candidate', 'email')
+    .populate('recruiter', 'email')
+    .lean();
+
+  const User = (await import('../models/user.model.js')).default;
+  const { notify } = await import('./notification.service.js');
+
+  for (const m of meetings) {
+    const idStr = m._id.toString();
+    if (meetingReminderSentIds.has(idStr)) continue;
+    meetingReminderSentIds.add(idStr);
+    const emails = getInvitationEmails(m);
+    const publicUrl = getPublicMeetingUrl(m.meetingId);
+    const title = m.title || 'Meeting';
+    const message = `Your meeting "${title}" starts in 15 minutes.`;
+    for (const email of emails) {
+      const user = await User.findOne({ email: new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') })
+        .select('_id')
+        .lean();
+      if (user) {
+        notify(user._id, { type: 'meeting_reminder', title: 'Meeting reminder', message, link: publicUrl }).catch(() => {});
+      }
+    }
+  }
+
+  const toDelete = [];
+  for (const idStr of meetingReminderSentIds) {
+    const meeting = await Meeting.findById(idStr).select('scheduledAt').lean();
+    if (!meeting || meeting.scheduledAt < now) toDelete.push(idStr);
+  }
+  toDelete.forEach((id) => meetingReminderSentIds.delete(id));
 };
 
 export {

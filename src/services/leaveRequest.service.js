@@ -174,6 +174,14 @@ const approveLeaveRequest = async (requestId, adminComment, user) => {
       user
     );
 
+    const { notifyByEmail } = await import('./notification.service.js');
+    notifyByEmail(leaveRequest.studentEmail, {
+      type: 'leave',
+      title: 'Leave request approved',
+      message: adminComment ? `Your leave request has been approved. Comment: ${adminComment}` : 'Your leave request has been approved.',
+      link: '/settings/attendance/leave-requests',
+    }).catch(() => {});
+
     return {
       success: true,
       message: 'Leave request approved and leave assigned successfully',
@@ -218,6 +226,14 @@ const rejectLeaveRequest = async (requestId, adminComment, user) => {
   leaveRequest.reviewedBy = user.id;
   leaveRequest.reviewedAt = new Date();
   await leaveRequest.save();
+
+  const { notifyByEmail } = await import('./notification.service.js');
+  notifyByEmail(leaveRequest.studentEmail, {
+    type: 'leave',
+    title: 'Leave request rejected',
+    message: adminComment ? `Your leave request was not approved. Comment: ${adminComment}` : 'Your leave request was not approved.',
+    link: '/settings/attendance/leave-requests',
+  }).catch(() => {});
 
   return leaveRequest
     .populate('student', 'user')

@@ -1385,7 +1385,16 @@ const assignRecruiterToCandidate = async (candidateId, recruiterId) => {
   }
   candidate.assignedRecruiter = recruiterId;
   await candidate.save();
-  
+
+  const { notify } = await import('./notification.service.js');
+  const candidateName = candidate.fullName || candidate.email || 'a candidate';
+  notify(recruiterId, {
+    type: 'recruiter',
+    title: 'Candidate assigned',
+    message: `You have been assigned as recruiter to ${candidateName}.`,
+    link: `/candidates/${candidateId}`,
+  }).catch(() => {});
+
   // Populate recruiter information
   await candidate.populate([
     { path: 'owner', select: 'name email' },
@@ -1393,7 +1402,7 @@ const assignRecruiterToCandidate = async (candidateId, recruiterId) => {
     { path: 'assignedRecruiter', select: 'name email role' },
     { path: 'recruiterNotes.addedBy', select: 'name email role' },
   ]);
-  
+
   return candidate;
 };
 

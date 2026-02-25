@@ -30,6 +30,7 @@ import config from '../../config/config.js';
 import blogRoute from './blog.route.js';
 import livekitRoute from './livekit.route.js';
 import meetingRoute from './meeting.route.js';
+import notificationRoute from './notification.route.js';
 import recordingRoute from './recording.route.js';
 import atsAnalyticsRoute from './atsAnalytics.route.js';
 import jobApplicationRoute from './jobApplication.route.js';
@@ -200,6 +201,10 @@ const defaultRoutes = [
   {
     path: '/meetings',
     route: meetingRoute,
+  },
+  {
+    path: '/notifications',
+    route: notificationRoute,
   },
   {
     path: '/recordings',

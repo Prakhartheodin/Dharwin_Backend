@@ -3,6 +3,7 @@ import logger from '../config/logger.js';
 
 /**
  * Auto deactivate candidates whose resign date has arrived.
+ * Notifies candidate (by email) and admin (in-app) when deactivated.
  * @returns {Promise<number>} Number of candidates deactivated
  */
 const autoDeactivateResignedCandidates = async () => {
@@ -13,21 +14,32 @@ const autoDeactivateResignedCandidates = async () => {
     const candidatesToDeactivate = await Candidate.find({
       resignDate: { $lte: now },
       isActive: true,
-    }).select('_id fullName email resignDate');
+    })
+      .select('_id fullName email resignDate adminId')
+      .lean();
 
     if (!candidatesToDeactivate.length) return 0;
 
+    const { notify, notifyByEmail } = await import('./notification.service.js');
     let deactivated = 0;
-    for (const candidate of candidatesToDeactivate) {
+    for (const c of candidatesToDeactivate) {
       try {
-        candidate.isActive = false;
-        await candidate.save();
+        await Candidate.updateOne({ _id: c._id }, { isActive: false });
         deactivated++;
         logger.info(
-          `Auto-deactivated candidate ${candidate.fullName} (ID: ${candidate._id}, Email: ${candidate.email}) on resign date: ${candidate.resignDate.toISOString()}`
+          `Auto-deactivated candidate ${c.fullName} (ID: ${c._id}, Email: ${c.email}) on resign date: ${c.resignDate?.toISOString?.() || c.resignDate}`
         );
+        const title = 'Candidate auto-deactivated';
+        const message = `${c.fullName || c.email || 'Candidate'} was auto-deactivated on resign date.`;
+        const link = `/candidates/${c._id}`;
+        if (c.adminId) {
+          notify(c.adminId, { type: 'account', title, message, link }).catch(() => {});
+        }
+        if (c.email) {
+          notifyByEmail(c.email, { type: 'account', title, message, link }).catch(() => {});
+        }
       } catch (e) {
-        logger.error(`Error auto-deactivating candidate ${candidate._id} (${candidate.email}): ${e.message}`);
+        logger.error(`Error auto-deactivating candidate ${c._id} (${c.email}): ${e.message}`);
       }
     }
 
@@ -43,6 +55,46 @@ const autoDeactivateResignedCandidates = async () => {
 };
 
 /**
+ * Send joining date reminders for candidates whose joining date is in 3 days.
+ * Notifies admin (in-app) and candidate (by email).
+ */
+const sendJoiningDateReminders = async () => {
+  try {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const inThreeDays = new Date(today);
+    inThreeDays.setDate(inThreeDays.getDate() + 3);
+    const nextDay = new Date(inThreeDays);
+    nextDay.setDate(nextDay.getDate() + 1);
+
+    const candidates = await Candidate.find({
+      joiningDate: { $gte: inThreeDays, $lt: nextDay },
+      isActive: true,
+    })
+      .select('_id fullName email adminId')
+      .lean();
+
+    if (!candidates.length) return;
+
+    const { notify, notifyByEmail } = await import('./notification.service.js');
+    for (const c of candidates) {
+      const name = c.fullName || c.email || 'Candidate';
+      const title = 'Joining date reminder';
+      const message = `Reminder: ${name}'s joining date is in 3 days.`;
+      const link = `/candidates/${c._id}`;
+      if (c.adminId) {
+        notify(c.adminId, { type: 'account', title, message, link }).catch(() => {});
+      }
+      if (c.email) {
+        notifyByEmail(c.email, { type: 'account', title, message, link }).catch(() => {});
+      }
+    }
+  } catch (e) {
+    logger.error(`sendJoiningDateReminders failed: ${e.message}`);
+  }
+};
+
+/**
  * @param {number} intervalMinutes Default 60
  * @returns {NodeJS.Timeout}
  */
@@ -50,6 +102,7 @@ const startCandidateScheduler = (intervalMinutes = 60) => {
   const intervalMs = intervalMinutes * 60 * 1000;
   const run = async () => {
     await autoDeactivateResignedCandidates();
+    await sendJoiningDateReminders();
   };
   run();
   const id = setInterval(run, intervalMs);
@@ -66,4 +119,4 @@ const stopCandidateScheduler = (id) => {
   return false;
 };
 
-export { autoDeactivateResignedCandidates, startCandidateScheduler, stopCandidateScheduler };
+export { autoDeactivateResignedCandidates, sendJoiningDateReminders, startCandidateScheduler, stopCandidateScheduler };

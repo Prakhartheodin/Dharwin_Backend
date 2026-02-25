@@ -20,6 +20,16 @@ const createProject = async (createdById, payload) => {
     { path: 'assignedTo', select: 'name email' },
     { path: 'assignedTeams', select: 'name' },
   ]);
+  const assigneeIds = (project.assignedTo || []).map((u) => u._id).filter(Boolean);
+  if (assigneeIds.length) {
+    const { notify } = await import('./notification.service.js');
+    const link = `/projects/${project._id}`;
+    const title = 'Project assigned';
+    const message = `You have been assigned to project "${project.name}".`;
+    for (const userId of assigneeIds) {
+      notify(userId, { type: 'project', title, message, link }).catch(() => {});
+    }
+  }
   return project;
 };
 
@@ -82,6 +92,7 @@ const updateProjectById = async (id, updateBody, currentUser) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
 
+  const oldAssigneeIds = new Set((project.assignedTo || []).map((u) => String(u._id || u)).filter(Boolean));
   Object.assign(project, updateBody);
   await project.save();
 
@@ -90,6 +101,18 @@ const updateProjectById = async (id, updateBody, currentUser) => {
     { path: 'assignedTo', select: 'name email' },
     { path: 'assignedTeams', select: 'name' },
   ]);
+
+  const newAssigneeIds = (project.assignedTo || []).map((u) => u._id).filter(Boolean);
+  const addedIds = newAssigneeIds.filter((uid) => !oldAssigneeIds.has(String(uid)));
+  if (addedIds.length) {
+    const { notify } = await import('./notification.service.js');
+    const link = `/projects/${project._id}`;
+    const title = 'Project assigned';
+    const message = `You have been assigned to project "${project.name}".`;
+    for (const userId of addedIds) {
+      notify(userId, { type: 'project', title, message, link }).catch(() => {});
+    }
+  }
 
   return project;
 };

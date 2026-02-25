@@ -72,6 +72,17 @@ const userSchema = mongoose.Schema(
       type: Date,
       default: null,
     },
+    notificationPreferences: {
+      leaveUpdates: { type: Boolean, default: true },
+      taskAssignments: { type: Boolean, default: true },
+      applicationUpdates: { type: Boolean, default: true },
+      offerUpdates: { type: Boolean, default: true },
+      meetingInvitations: { type: Boolean, default: true },
+      meetingReminders: { type: Boolean, default: true },
+      certificates: { type: Boolean, default: true },
+      courseUpdates: { type: Boolean, default: true },
+      recruiterUpdates: { type: Boolean, default: true },
+    },
   },
   {
     timestamps: true,

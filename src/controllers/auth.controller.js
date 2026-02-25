@@ -310,9 +310,16 @@ const sendCandidateInvitation = catchAsync(async (req, res) => {
 
   if (invitations && Array.isArray(invitations)) {
     const results = { successful: [], failed: [], total: invitations.length };
+    const { notifyByEmail } = await import('../services/notification.service.js');
     const emailPromises = invitations.map(async (invitation) => {
       try {
         await sendCandidateInvitationEmail(invitation.email, invitation.onboardUrl);
+        notifyByEmail(invitation.email, {
+          type: 'general',
+          title: "You're invited to complete your onboarding",
+          message: 'Click the link in the email to get started.',
+          link: invitation.onboardUrl,
+        }).catch(() => {});
         results.successful.push({ email: invitation.email, onboardUrl: invitation.onboardUrl });
       } catch (error) {
         results.failed.push({ email: invitation.email, onboardUrl: invitation.onboardUrl, error: error.message });
@@ -325,6 +332,13 @@ const sendCandidateInvitation = catchAsync(async (req, res) => {
     });
   } else {
     await sendCandidateInvitationEmail(email, onboardUrl);
+    const { notifyByEmail } = await import('../services/notification.service.js');
+    notifyByEmail(email, {
+      type: 'general',
+      title: "You're invited to complete your onboarding",
+      message: 'Click the link in the email to get started.',
+      link: onboardUrl,
+    }).catch(() => {});
     res.status(httpStatus.OK).json({ message: 'Candidate invitation email sent successfully', email });
   }
 });

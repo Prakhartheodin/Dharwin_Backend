@@ -223,6 +223,14 @@ const shareJobEmail = catchAsync(async (req, res) => {
   }
   const { to, message } = req.body;
   await sendJobShareEmail(to, job, message);
+  const frontendBase = (await import('../config/config.js')).default?.frontendBaseUrl || 'http://localhost:3001';
+  const { notifyByEmail } = await import('../services/notification.service.js');
+  notifyByEmail(to, {
+    type: 'general',
+    title: `Job shared: ${job.title}`,
+    message: `${job.organisation?.name || 'Company'}${job.location ? ` - ${job.location}` : ''}`,
+    link: `${frontendBase}/ats/jobs`,
+  }).catch(() => {});
   res.send({ message: 'Job shared successfully' });
 });
 
