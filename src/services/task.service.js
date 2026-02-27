@@ -17,19 +17,8 @@ const createTask = async (createdById, payload) => {
   });
   await task.populate([
     { path: 'createdBy', select: 'name email' },
-    { path: 'assignedTo', select: 'name email' },
     { path: 'projectId', select: 'name' },
   ]);
-  const assigneeId = task.assignedTo?._id || task.assignedTo;
-  if (assigneeId && String(assigneeId) !== String(createdById)) {
-    const { notify } = await import('./notification.service.js');
-    notify(assigneeId, {
-      type: 'task',
-      title: 'Task assigned to you',
-      message: `"${task.title || 'Task'}" has been assigned to you.`,
-      link: '/task/kanban-board',
-    }).catch(() => {});
-  }
   return task;
 };
 
@@ -71,7 +60,7 @@ const queryTasks = async (filter, options) => {
       .sort(sort)
       .skip(skip)
       .limit(limit)
-      .populate([{ path: 'createdBy', select: 'name email' }, { path: 'assignedTo', select: 'name email' }, { path: 'projectId', select: 'name' }])
+      .populate([{ path: 'createdBy', select: 'name email' }, { path: 'projectId', select: 'name' }])
       .exec(),
     Task.countDocuments(finalFilter).exec(),
   ]);
@@ -85,7 +74,6 @@ const getTaskById = async (id) => {
   if (!task) return null;
   await task.populate([
     { path: 'createdBy', select: 'name email' },
-    { path: 'assignedTo', select: 'name email' },
     { path: 'projectId', select: 'name' },
   ]);
   return task;
@@ -100,24 +88,12 @@ const updateTaskById = async (id, updateBody, currentUser) => {
   if (!canUpdate) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
-  const previousAssignee = task.assignedTo?._id || task.assignedTo;
   Object.assign(task, updateBody);
   await task.save();
   await task.populate([
     { path: 'createdBy', select: 'name email' },
-    { path: 'assignedTo', select: 'name email' },
     { path: 'projectId', select: 'name' },
   ]);
-  const newAssigneeId = task.assignedTo?._id || task.assignedTo;
-  if (newAssigneeId && String(newAssigneeId) !== String(previousAssignee) && String(newAssigneeId) !== String(currentUser.id || currentUser._id)) {
-    const { notify } = await import('./notification.service.js');
-    notify(newAssigneeId, {
-      type: 'task',
-      title: 'Task assigned to you',
-      message: `"${task.title || 'Task'}" has been assigned to you.`,
-      link: '/task/kanban-board',
-    }).catch(() => {});
-  }
   return task;
 };
 
@@ -136,7 +112,6 @@ const updateTaskStatusById = async (id, status, order, currentUser) => {
   await task.save();
   await task.populate([
     { path: 'createdBy', select: 'name email' },
-    { path: 'assignedTo', select: 'name email' },
     { path: 'projectId', select: 'name' },
   ]);
   if (creatorId && String(creatorId) !== String(currentUser.id || currentUser._id)) {
