@@ -36,12 +36,19 @@ const queryTasks = async (filter, options) => {
 
   const userId = filter.userId;
   const userRoleIds = filter.userRoleIds;
+  const assignedToMe = filter.assignedToMe === true || filter.assignedToMe === 'true';
   delete filter.userRoleIds;
   delete filter.userId;
+  delete filter.assignedToMe;
 
   const isAdmin = await userIsAdmin({ roleIds: userRoleIds || [] });
   let finalFilter = { ...filter };
-  if (!isAdmin && userId) {
+  
+  if (assignedToMe && userId) {
+    // Show only tasks assigned to the current user
+    finalFilter.assignedTo = userId;
+  } else if (!isAdmin && userId) {
+    // Show tasks created by or assigned to the current user
     finalFilter = {
       $and: [
         finalFilter,
@@ -103,9 +110,14 @@ const updateTaskStatusById = async (id, status, order, currentUser) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   }
   const canUpdate = await isOwnerOrAdmin(currentUser, task);
-  if (!canUpdate) {
+  const isAssigned = (task.assignedTo || []).some(
+    (u) => String(u._id || u) === String(currentUser.id || currentUser._id)
+  );
+  
+  if (!canUpdate && !isAssigned) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
+  
   const creatorId = task.createdBy?._id || task.createdBy;
   task.status = status;
   if (typeof order === 'number') task.order = order;

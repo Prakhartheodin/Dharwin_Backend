@@ -33,6 +33,7 @@ const getTasks = {
     status: Joi.string().valid(...TASK_STATUSES).optional(),
     projectId: Joi.string().custom(objectId).optional(),
     search: Joi.string().optional(),
+    assignedToMe: Joi.boolean().optional(),
     sortBy: Joi.string().optional(),
     limit: Joi.number().integer().optional(),
     page: Joi.number().integer().optional(),

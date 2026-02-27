@@ -19,7 +19,7 @@ const create = catchAsync(async (req, res) => {
 });
 
 const list = catchAsync(async (req, res) => {
-  const filter = pick(req.query, ['status', 'projectId', 'search']);
+  const filter = pick(req.query, ['status', 'projectId', 'search', 'assignedToMe']);
   filter.userRoleIds = req.user.roleIds || [];
   filter.userId = req.user.id || req.user._id;
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
