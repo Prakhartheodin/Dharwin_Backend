@@ -69,7 +69,7 @@ const envVarsSchema = Joi.object()
 
     // Auth rate limit (deployed apps often share IPs; increase to avoid 429 on sign-in)
     RATE_LIMIT_AUTH_WINDOW_MINUTES: Joi.number().optional().default(15).description('Auth rate limit window in minutes'),
-    RATE_LIMIT_AUTH_MAX: Joi.number().optional().default(200).description('Max failed auth requests per window per IP'),
+    RATE_LIMIT_AUTH_MAX: Joi.number().optional().default(500).description('Max failed auth requests per window per IP'),
   })
   .unknown();
 
@@ -146,7 +146,7 @@ const config = {
   },
   rateLimit: {
     authWindowMinutes: envVars.RATE_LIMIT_AUTH_WINDOW_MINUTES ?? 15,
-    authMax: envVars.RATE_LIMIT_AUTH_MAX ?? 200,
+    authMax: envVars.RATE_LIMIT_AUTH_MAX ?? 500,
   },
 };
 

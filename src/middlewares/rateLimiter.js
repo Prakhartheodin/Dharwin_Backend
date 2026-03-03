@@ -3,7 +3,7 @@ import config from '../config/config.js';
 
 const authLimiter = rateLimit({
   windowMs: (config.rateLimit?.authWindowMinutes ?? 15) * 60 * 1000,
-  max: config.rateLimit?.authMax ?? 200,
+  max: config.rateLimit?.authMax ?? 500,
   skipSuccessfulRequests: true,
   message: { message: 'Too many sign-in attempts. Please try again later.' },
 });
