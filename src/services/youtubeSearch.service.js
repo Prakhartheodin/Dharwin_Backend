@@ -6,7 +6,7 @@ const YOUTUBE_API_BASE = 'https://www.googleapis.com/youtube/v3';
 export async function searchVideos(topic, maxResults = 4) {
   const apiKey = config.youtube?.apiKey;
   if (!apiKey) {
-    logger.warn('YOUTUBE_API_KEY not set — skipping video search. Add YOUTUBE_API_KEY to .env');
+    logger.warn('GCP_YOUTUBE_API_KEY not set — skipping video search. Add GCP_YOUTUBE_API_KEY to .env');
     return [];
   }
 
