@@ -91,4 +91,60 @@ const uploadJobApplicationFiles = (req, res, next) => {
   });
 };
 
-export { uploadSingle, uploadJobApplicationFiles };
+// Image/video file filter for support ticket attachments
+const imageVideoFileFilter = (req, file, cb) => {
+  const allowedImageTypes = [
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'image/bmp',
+    'image/svg+xml',
+  ];
+  const allowedVideoTypes = [
+    'video/mp4',
+    'video/webm',
+    'video/quicktime',
+    'video/x-msvideo',
+    'video/x-matroska',
+  ];
+  const allowedTypes = [...allowedImageTypes, ...allowedVideoTypes];
+
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(
+      new ApiError(
+        httpStatus.BAD_REQUEST,
+        `File type ${file.mimetype} is not allowed. Allowed: Images (JPEG, PNG, GIF, WEBP, BMP, SVG) and Videos (MP4, WEBM, MOV, AVI, MKV)`
+      ),
+      false
+    );
+  }
+};
+
+const imageVideoUpload = multer({
+  storage,
+  fileFilter: imageVideoFileFilter,
+  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB per file
+});
+
+const uploadImagesVideos = (fieldName = 'attachments', maxCount = 10) => (req, res, next) => {
+  imageVideoUpload.array(fieldName, maxCount)(req, res, (err) => {
+    if (err) {
+      if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+          return next(new ApiError(httpStatus.BAD_REQUEST, 'File size too large. Maximum 100MB per file.'));
+        }
+        if (err.code === 'LIMIT_FILE_COUNT') {
+          return next(new ApiError(httpStatus.BAD_REQUEST, `Too many files. Maximum ${maxCount} allowed.`));
+        }
+      }
+      return next(err);
+    }
+    next();
+  });
+};
+
+export { uploadSingle, uploadJobApplicationFiles, uploadImagesVideos };

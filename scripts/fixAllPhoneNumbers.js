@@ -49,7 +49,7 @@ for (let i = 1; i < personalInfoData.length; i++) {
   if (!row || !row[phoneNumberIndex]) continue;
   
   const phoneNumber = String(row[phoneNumberIndex]).trim().replace(/\D/g, '');
-  let countryCode = String(row[countryCodeIndex] || 'US').trim();
+  const countryCode = String(row[countryCodeIndex] || 'US').trim();
   
   // Check if current country code is valid for this phone number
   const rule = PHONE_RULES[countryCode];
@@ -80,7 +80,7 @@ for (let i = 1; i < personalInfoData.length; i++) {
   // Fix supervisor phone if present
   if (row[supervisorContactIndex]) {
     const supervisorPhone = String(row[supervisorContactIndex]).trim().replace(/\D/g, '');
-    let supervisorCountryCode = row[supervisorCountryCodeIndex] || row[countryCodeIndex];
+    const supervisorCountryCode = row[supervisorCountryCodeIndex] || row[countryCodeIndex];
     
     const supervisorRule = PHONE_RULES[supervisorCountryCode];
     let supervisorValid = false;

@@ -6,6 +6,7 @@ import JobApplication from '../models/jobApplication.model.js';
 import Candidate from '../models/candidate.model.js';
 import ApiError from '../utils/ApiError.js';
 import { userIsAdmin } from '../utils/roleHelpers.js';
+import callRecordService from './callRecord.service.js';
 
 const isOwnerOrAdmin = async (user, resource) => {
   if (!resource) return false;
@@ -756,7 +757,6 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
             });
 
             // Create call record
-            const callRecordService = require('./callRecord.service.js').default;
             callRecordService.createRecord({
               executionId: result.executionId,
               recipientPhone: formattedPhone,

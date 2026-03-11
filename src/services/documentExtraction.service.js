@@ -9,6 +9,7 @@ import logger from '../config/logger.js';
  * YouTube links found on each page are injected inline so they associate
  * with the correct module when the text is later split by module headers.
  */
+/* eslint-disable import/no-extraneous-dependencies */
 async function extractTextFromPdfBuffer(buffer) {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer);
@@ -151,7 +152,9 @@ function parseQuizOptions(optionsText) {
   const opts = [];
   const re = /([A-D])\)\s*(.+?)(?=\s*[A-D]\)|$)/gs;
   let m;
-  while ((m = re.exec(optionsText)) !== null) {
+  for (;;) {
+    m = re.exec(optionsText);
+    if (m === null) break;
     opts.push({ letter: m[1].toUpperCase(), text: m[2].trim() });
   }
   return opts;

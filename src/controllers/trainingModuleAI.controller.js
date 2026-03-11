@@ -28,7 +28,11 @@ function extractYouTubeUrlsFromText(text) {
   const re = new RegExp(YOUTUBE_URL_REGEX_SRC, 'g');
   const ids = [];
   let m;
-  while ((m = re.exec(text)) !== null) ids.push(m[1]);
+  for (;;) {
+    m = re.exec(text);
+    if (m === null) break;
+    ids.push(m[1]);
+  }
   return [...new Set(ids)];
 }
 
@@ -49,7 +53,11 @@ function extractContentFromDocument(text) {
     const optionsArea = answerLineIdx > 0 ? block.slice(0, answerLineIdx) : block;
     const optRe = /([A-D])\)\s*(.+)/g;
     let om;
-    while ((om = optRe.exec(optionsArea)) !== null) opts.push({ letter: om[1].toUpperCase(), text: om[2].trim() });
+    for (;;) {
+      om = optRe.exec(optionsArea);
+      if (om === null) break;
+      opts.push({ letter: om[1].toUpperCase(), text: om[2].trim() });
+    }
     const ansMatch = block.match(/Answer\s*:\s*([A-D])\)?/i);
     const correctLetter = ansMatch ? ansMatch[1].toUpperCase() : (opts[0]?.letter || null);
     if (questionText && opts.length >= 2) {
@@ -93,7 +101,9 @@ function extractEssaysFromSection(sectionText, opts = {}) {
   const section = (sectionText || '').match(ESSAY_SECTION_HEADER)?.[0] || sectionText || '';
   const re = /(?:^|\n)\s*([1-9]\d*)\.\s+([^\n]+(?:\n(?![1-9]\d*\.\s)[^\n]*)*)/g;
   let m;
-  while ((m = re.exec(section)) !== null) {
+  for (;;) {
+    m = re.exec(section);
+    if (m === null) break;
     const block = m[2].trim();
     const firstLine = block.split(/\n/)[0]?.trim() || '';
     const isModuleHeader = /^Module\s*\d+[:.]?\s/i.test(block) || /Module\s*\d+.*Video Resources/i.test(block);
@@ -350,7 +360,11 @@ function extractContentByModuleFromDocument(text) {
       const optionsArea = answerLineIdx > 0 ? block.slice(0, answerLineIdx) : block;
       const optRe = /([A-D])\)\s*(.+)/g;
       let om;
-      while ((om = optRe.exec(optionsArea)) !== null) opts.push({ letter: om[1].toUpperCase(), text: om[2].trim() });
+      for (;;) {
+        om = optRe.exec(optionsArea);
+        if (om === null) break;
+        opts.push({ letter: om[1].toUpperCase(), text: om[2].trim() });
+      }
       const ansMatch = block.match(/Answer\s*:\s*([A-D])\)?/i);
       const correctLetter = ansMatch ? ansMatch[1].toUpperCase() : (opts[0]?.letter || null);
       if (questionText && opts.length >= 2) {
@@ -461,7 +475,11 @@ function extractDocumentForDisplay(rawText) {
       const optionsArea = answerLineIdx > 0 ? block.slice(0, answerLineIdx) : block;
       const optRe = /([A-D])\)\s*(.+)/g;
       let om;
-      while ((om = optRe.exec(optionsArea)) !== null) opts.push({ letter: om[1].toUpperCase(), text: om[2].trim() });
+      for (;;) {
+        om = optRe.exec(optionsArea);
+        if (om === null) break;
+        opts.push({ letter: om[1].toUpperCase(), text: om[2].trim() });
+      }
       const ansMatch = block.match(/Answer\s*:\s*([A-D])\)?/i);
       const correctLetter = ansMatch ? ansMatch[1].toUpperCase() : (opts[0]?.letter || null);
       if (questionText && opts.length >= 2) {
@@ -1184,7 +1202,10 @@ export const processDocument = async (req, res) => {
       file.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||
       file.mimetype === 'application/vnd.ms-excel';
 
-    let normalizedText, extractedByModule, youtubeUrls, documentTitle;
+    let normalizedText;
+    let extractedByModule;
+    let youtubeUrls;
+    let documentTitle;
 
     if (isExcel) {
       const result = extractStructuredDataFromExcel(file.buffer);

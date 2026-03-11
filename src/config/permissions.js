@@ -78,6 +78,19 @@ export const permissionAliases = {
   'recruiters.read': ['recruiters.read', 'ats.recruiters:view', 'ats.recruiters:view,create,edit,delete'],
   'chats.read': ['chats.read', 'communication.chats:view', 'communication.chats:view,create,edit,delete'],
   'chats.manage': ['chats.manage', 'communication.chats:create,edit,delete', 'communication.chats:view,create,edit,delete'],
+  // Support tickets: support.tickets:view → tickets.read, support.tickets:create,edit,delete → tickets.manage
+  'supportTickets.read': [
+    'supportTickets.read',
+    'tickets.read',
+    'support.tickets:view',
+    'support.tickets:view,create,edit,delete',
+  ],
+  'supportTickets.manage': [
+    'supportTickets.manage',
+    'tickets.manage',
+    'support.tickets:create,edit,delete',
+    'support.tickets:view,create,edit,delete',
+  ],
 };
 
 /**

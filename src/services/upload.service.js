@@ -39,5 +39,16 @@ const uploadFileToS3 = async (file, userId, folder = 'documents') => {
   }
 };
 
-export { uploadFileToS3 };
+// Upload multiple files to S3
+const uploadMultipleFilesToS3 = async (files, userId, folder = 'documents') => {
+  try {
+    const uploadPromises = files.map((file) => uploadFileToS3(file, userId, folder));
+    const results = await Promise.all(uploadPromises);
+    return results;
+  } catch (error) {
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Failed to upload files: ${error.message}`);
+  }
+};
+
+export { uploadFileToS3, uploadMultipleFilesToS3 };
 

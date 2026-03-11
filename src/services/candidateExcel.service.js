@@ -158,7 +158,7 @@ function parseMultiSheetExcel(fileBuffer) {
   
   // Parse optional Skills sheet
   if (workbook.SheetNames.includes('Skills')) {
-    const skillsSheet = workbook.Sheets['Skills'];
+    const skillsSheet = workbook.Sheets.Skills;
     const skillsData = XLSX.utils.sheet_to_json(skillsSheet, { header: 1 });
     
     for (let i = 1; i < skillsData.length; i++) {
@@ -181,7 +181,7 @@ function parseMultiSheetExcel(fileBuffer) {
   
   // Parse optional Qualification sheet
   if (workbook.SheetNames.includes('Qualification')) {
-    const qualificationSheet = workbook.Sheets['Qualification'];
+    const qualificationSheet = workbook.Sheets.Qualification;
     const qualificationData = XLSX.utils.sheet_to_json(qualificationSheet, { header: 1 });
     
     for (let i = 1; i < qualificationData.length; i++) {

@@ -1,10 +1,10 @@
 /**
  * Script to create a new Bolna agent for Job Application Verification Calls
  * This agent will call candidates after they apply to jobs
- * 
+ *
  * Run from backend root: node scripts/createBolnaAgent.js
  */
-
+/* eslint-disable import/no-extraneous-dependencies */
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 import { fileURLToPath } from 'url';
