@@ -102,12 +102,6 @@ const parseClientGeoHeader = (req) => {
 };
 
 /**
- * Only attach client-reported GPS when the request is authenticated (JWT / cookie session).
- * @param {import('express').Request|null|undefined} req
- */
-const canAttachClientGeo = (req) => Boolean(req?.user);
-
-/**
  * Create an activity log entry. Do not pass sensitive PII in metadata.
  * On persistence failure, logs and resolves to null — primary request flow must not depend on success.
  * @param {string} actorId - User id who performed the action
@@ -120,21 +114,34 @@ const canAttachClientGeo = (req) => Boolean(req?.user);
  */
 const createActivityLog = async (actorId, action, entityType, entityId, metadata = {}, req = null) => {
   const headerGeo = geoFromTrustedHeaders(req);
-  const ip = req?.ip || req?.connection?.remoteAddress || null;
-  const resolvedGeo = resolveGeoForDisplay(ip, headerGeo);
-  const geo =
-    resolvedGeo &&
-    (resolvedGeo.country || resolvedGeo.region || resolvedGeo.city
-      ? {
-          country: resolvedGeo.country ?? null,
-          region: resolvedGeo.region ?? null,
-          city: resolvedGeo.city ?? null,
-        }
-      : null);
-  let clientGeo = null;
-  if (req && canAttachClientGeo(req)) {
-    clientGeo = parseClientGeoHeader(req);
+  const clientProvidedIp = req?.get?.('x-activity-client-ip') || req?.get?.('X-Activity-Client-Ip');
+  const ip = clientProvidedIp || req?.ip || req?.connection?.remoteAddress || null;
+
+  const clientCity = req?.get?.('x-activity-client-city') || req?.get?.('X-Activity-Client-City');
+  const clientRegion = req?.get?.('x-activity-client-region') || req?.get?.('X-Activity-Client-Region');
+  const clientCountry = req?.get?.('x-activity-client-country') || req?.get?.('X-Activity-Client-Country');
+
+  let geo = null;
+  if (clientCity || clientRegion || clientCountry) {
+    geo = {
+      city: clientCity || null,
+      region: clientRegion || null,
+      country: clientCountry || null,
+    };
+  } else {
+    const resolvedGeo = resolveGeoForDisplay(ip, headerGeo);
+    geo =
+      resolvedGeo &&
+      (resolvedGeo.country || resolvedGeo.region || resolvedGeo.city
+        ? {
+            country: resolvedGeo.country ?? null,
+            region: resolvedGeo.region ?? null,
+            city: resolvedGeo.city ?? null,
+          }
+        : null);
   }
+
+  const clientGeo = req ? parseClientGeoHeader(req) : null;
 
   const entry = {
     actor: actorId,
