@@ -2,7 +2,7 @@ import httpStatus from 'http-status';
 import catchAsync from '../utils/catchAsync.js';
 import ApiError from '../utils/ApiError.js';
 import config from '../config/config.js';
-import { createUser, getUserByEmail, updateUserById } from '../services/user.service.js';
+import { createUser, getUserByEmail, getUserById, updateUserById } from '../services/user.service.js';
 import { generateAuthTokens, generateResetPasswordToken, generateVerifyEmailToken, getSessionsForUser } from '../services/token.service.js';
 import { loginUserWithEmailAndPassword, logout as logout2, refreshAuth, resetPassword as resetPassword2, changePassword as changePassword2, verifyEmail as verifyEmail2, startImpersonation, stopImpersonation as stopImpersonationService } from '../services/auth.service.js';
 import { sendResetPasswordEmail, sendVerificationEmail as sendVerificationEmail2, sendCandidateInvitationEmail } from '../services/email.service.js';
@@ -20,6 +20,8 @@ import {
 import { getRoleByName } from '../services/role.service.js';
 import { userHasCandidateRole, userIsAdmin, userIsAgent, validateRoleIdsForAgent } from '../utils/roleHelpers.js';
 import { getMyPermissionsForFrontend } from '../services/permission.service.js';
+import { pickUserDisplayForActivityLog } from '../utils/activityLogSubject.util.js';
+import Impersonation from '../models/impersonation.model.js';
 import { generatePresignedDownloadUrl } from '../config/s3.js';
 // import { authService, userService, tokenService, emailService } from '../services/index.js';
 // import { authService, userService, tokenService, emailService } from '../services';
@@ -130,7 +132,14 @@ const register = catchAsync(async (req, res) => {
   }
   const user = await createUser(bodyForCreate);
   if (req.user) {
-    await activityLogService.createActivityLog(req.user.id, ActivityActions.USER_CREATE, EntityTypes.USER, user.id, { roleIds: user.roleIds }, req);
+    await activityLogService.createActivityLog(
+      req.user.id,
+      ActivityActions.USER_CREATE,
+      EntityTypes.USER,
+      user.id,
+      { roleIds: user.roleIds, ...pickUserDisplayForActivityLog(user) },
+      req
+    );
     try {
       await applyInitialCandidateProfileFromAdmin(user.id, {
         employeeId,
@@ -247,7 +256,7 @@ const registerRecruiter = catchAsync(async (req, res) => {
       ActivityActions.USER_CREATE,
       EntityTypes.USER,
       user.id,
-      { role: 'Recruiter' },
+      { role: 'Recruiter', ...pickUserDisplayForActivityLog(user) },
       req
     );
   }
@@ -272,7 +281,7 @@ const registerStudent = catchAsync(async (req, res) => {
       ActivityActions.USER_CREATE,
       EntityTypes.USER,
       user.id,
-      { role: 'Student', studentProfile: true },
+      { role: 'Student', studentProfile: true, ...pickUserDisplayForActivityLog(user) },
       req
     );
   }
@@ -306,7 +315,7 @@ const registerMentor = catchAsync(async (req, res) => {
       ActivityActions.USER_CREATE,
       EntityTypes.USER,
       user.id,
-      { role: 'Mentor', mentorProfile: true },
+      { role: 'Mentor', mentorProfile: true, ...pickUserDisplayForActivityLog(user) },
       req
     );
   }
@@ -342,6 +351,14 @@ const login = catchAsync(async (req, res) => {
   user.lastLoginAt = new Date();
   const tokens = await generateAuthTokens(user, req);
   setAuthCookies(res, tokens);
+  await activityLogService.createActivityLog(
+    user.id,
+    ActivityActions.USER_LOGIN,
+    EntityTypes.USER,
+    String(user.id),
+    { signInMethod: 'password', ...pickUserDisplayForActivityLog(user) },
+    req
+  );
   const userObj = await enrichUserWithFreshProfilePictureUrl(user);
   res.send({ user: userObj, tokens });
 });
@@ -351,7 +368,16 @@ const logout = catchAsync(async (req, res) => {
   if (!refreshToken) {
     throw new ApiError(httpStatus.UNAUTHORIZED, 'Please authenticate');
   }
-  await logout2(refreshToken);
+  const userId = await logout2(refreshToken);
+  const userForMeta = await getUserById(userId);
+  await activityLogService.createActivityLog(
+    userId,
+    ActivityActions.USER_LOGOUT,
+    EntityTypes.USER,
+    userId,
+    { signOutMethod: 'refresh_token', ...pickUserDisplayForActivityLog(userForMeta) },
+    req
+  );
   clearAuthCookies(res);
   res.status(httpStatus.NO_CONTENT).send();
 });
@@ -563,7 +589,7 @@ const impersonate = catchAsync(async (req, res) => {
     ActivityActions.IMPERSONATION_START,
     EntityTypes.IMPERSONATION,
     result.impersonation.impersonationId,
-    { impersonatedUserId: result.user.id },
+    { impersonatedUserId: result.user.id, ...pickUserDisplayForActivityLog(result.user) },
     req
   );
   setAuthCookies(res, result.tokens);
@@ -585,13 +611,15 @@ const stopImpersonation = catchAsync(async (req, res) => {
   if (!currentRefreshToken) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Refresh token required to stop impersonation');
   }
+  const impRow = await Impersonation.findById(req.impersonation.impersonationId).lean();
+  const impersonationTarget = impRow?.impersonatedUser ? await getUserById(impRow.impersonatedUser) : null;
   const result = await stopImpersonationService(req.impersonation.impersonationId, currentRefreshToken);
   await activityLogService.createActivityLog(
     req.impersonation.by,
     ActivityActions.IMPERSONATION_END,
     EntityTypes.IMPERSONATION,
     req.impersonation.impersonationId,
-    {},
+    pickUserDisplayForActivityLog(impersonationTarget),
     req
   );
   setAuthCookies(res, result.tokens);

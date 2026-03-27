@@ -18,6 +18,20 @@ export function normalizeIpForLookup(ip) {
  * @param {string} ip
  * @returns {boolean}
  */
+/**
+ * Loopback only (typical local `npm run dev` / browser → localhost API).
+ * GeoIP has no city for these; label separately from LAN private ranges.
+ * @param {string} ip
+ * @returns {boolean}
+ */
+export function isLoopbackIp(ip) {
+  const raw = (ip || '').trim().toLowerCase();
+  if (!raw) return false;
+  if (raw === '::1') return true;
+  const v4 = normalizeIpForLookup(raw);
+  return v4 === '127.0.0.1';
+}
+
 export function isNonPublicIp(ip) {
   const raw = (ip || '').trim().toLowerCase();
   if (!raw) return true;
@@ -65,7 +79,10 @@ export function resolveGeoForDisplay(ip, storedGeo) {
   if (!ip || typeof ip !== 'string' || !ip.trim()) return geo;
 
   if (isNonPublicIp(ip)) {
-    return { ...geo, city: 'Local / private network' };
+    const cityLabel = isLoopbackIp(ip)
+      ? 'Localhost (dev — not a public IP)'
+      : 'Local / private network';
+    return { ...geo, city: cityLabel };
   }
 
   try {

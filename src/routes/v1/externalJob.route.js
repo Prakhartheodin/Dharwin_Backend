@@ -1,15 +1,18 @@
 import express from 'express';
 import auth from '../../middlewares/auth.js';
-import requireAdministratorRole from '../../middlewares/requireAdministratorRole.js';
+import requireExternalJobsAccess from '../../middlewares/requireExternalJobsAccess.js';
 import externalJobController from '../../controllers/externalJob.controller.js';
 
 const router = express.Router();
 
-const adminAuth = [auth(), requireAdministratorRole()];
-
-router.post('/search', adminAuth, externalJobController.search);
-router.post('/save', adminAuth, externalJobController.save);
-router.get('/saved', adminAuth, externalJobController.listSaved);
-router.delete('/saved/:externalId', adminAuth, externalJobController.unsave);
+router.post('/search', auth(), requireExternalJobsAccess(), externalJobController.search);
+router.post('/save', auth(), requireExternalJobsAccess({ requireManage: true }), externalJobController.save);
+router.get('/saved', auth(), requireExternalJobsAccess(), externalJobController.listSaved);
+router.delete(
+  '/saved/:externalId',
+  auth(),
+  requireExternalJobsAccess({ requireManage: true }),
+  externalJobController.unsave
+);
 
 export default router;

@@ -6,8 +6,10 @@ Important actions by administrators and significant user actions are recorded fo
 
 ## Access control
 
-- **API permission:** `GET /v1/activity-logs` requires **`activityLogs.read`** *or* derived **`activity.read`** (e.g. from domain permission `logs.activity:view` on roles — see `src/config/permissions.js` and `permission.service.js`).
-- **Frontend:** Users with **`logs.activity:view`**, raw `activity.read` / `activityLogs.read`, the **Administrator** role (by name), or **platform super user** can open the Activity Logs UI. Enforcement on the API remains authoritative.
+- **API — list:** `requireActivityLogsListAccess`: designated platform email, **`platformSuperUser`**, users with **`activityLogs.read`** / **`activity.read`** (via roles), or **`actor` query equal to own user id** (candidate “my activity”). Full query filters apply for privileged callers; self-actor callers get **`{ actor: self }`** only (see `activityLog.controller.js`).
+- **API — export:** `GET /v1/activity-logs/export` requires a **designated** email (`requireDesignatedSuperadmin` only).
+- **Designated emails:** Comma-separated in **`DESIGNATED_SUPERADMIN_EMAILS`**; when unset or empty, defaults to **`harvinder@superadmin.in`**.
+- **Frontend:** Standard logs UI at **`/logs/logs-activity`** uses **`logs.activity:`** permission (and admin / platform super in **PermissionGuard**). Advanced console at **`/logs/logs-activity/platform`** is **designated-only** (`isDesignatedSuperadmin`).
 
 ---
 
@@ -30,7 +32,7 @@ Important actions by administrators and significant user actions are recorded fo
 
 **GET /v1/activity-logs**
 
-- **Auth:** Required. Caller must satisfy **`activityLogs.read`** / **`activity.read`** (or platform super user), as enforced by `requirePermissions('activityLogs.read')`.
+- **Auth:** See Access control (designated / platform super / activity read / self-actor).
 
 ### Query (optional)
 

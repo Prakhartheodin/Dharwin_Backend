@@ -11,13 +11,46 @@ import logger from '../config/logger.js';
 import * as offerService from './offer.service.js';
 
 /**
- * Build public meeting URL for a meetingId
- * @param {string} meetingId
+ * Display name for join link / email (hosts, candidate, recruiter, or email local-part).
+ * @param {Object} meeting - Meeting doc or plain object
+ * @param {string} emailAddress
  * @returns {string}
  */
-const getPublicMeetingUrl = (meetingId) => {
+const resolveInviteeDisplayName = (meeting, emailAddress) => {
+  if (!emailAddress || typeof emailAddress !== 'string') return 'Guest';
+  const em = emailAddress.trim().toLowerCase();
+  const hosts = meeting.hosts || [];
+  const host = hosts.find((h) => h.email && String(h.email).trim().toLowerCase() === em);
+  if (host?.nameOrRole && String(host.nameOrRole).trim()) return String(host.nameOrRole).trim();
+  const cand = meeting.candidate;
+  if (cand?.email && String(cand.email).trim().toLowerCase() === em) {
+    const n = cand.name || cand.fullName;
+    if (n && String(n).trim()) return String(n).trim();
+  }
+  const rec = meeting.recruiter;
+  if (rec?.email && String(rec.email).trim().toLowerCase() === em) {
+    if (rec.name && String(rec.name).trim()) return String(rec.name).trim();
+  }
+  const local = em.split('@')[0];
+  return local || 'Guest';
+};
+
+/**
+ * Build public meeting URL for a meetingId; optional name/email prefill for LiveKit join.
+ * @param {string} meetingId
+ * @param {{ name?: string, email?: string }} [invite]
+ * @returns {string}
+ */
+const getPublicMeetingUrl = (meetingId, invite = {}) => {
   const base = (config.frontendBaseUrl || '').replace(/\/$/, '');
-  return `${base}/join/room?room=${encodeURIComponent(meetingId)}`;
+  const params = new URLSearchParams();
+  params.set('room', meetingId);
+  const n = typeof invite.name === 'string' ? invite.name.trim() : '';
+  const e = typeof invite.email === 'string' ? invite.email.trim() : '';
+  if (n) params.set('name', n);
+  if (e) params.set('email', e);
+  const qs = params.toString();
+  return base ? `${base}/join/room?${qs}` : `/join/room?${qs}`;
 };
 
 /**
@@ -59,9 +92,8 @@ const createMeeting = async (body, userId) => {
     createdBy: userId,
   });
 
-  const publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
   const meetingObj = meeting.toJSON();
-  meetingObj.publicMeetingUrl = publicMeetingUrl;
+  meetingObj.publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
 
   // Update JobApplication to Interview when scheduling (candidate + job present)
   const candId = meeting.candidate?.id;
@@ -84,14 +116,16 @@ const createMeeting = async (body, userId) => {
 
   // Send invitation emails (fire-and-forget; log errors)
   const emails = getInvitationEmails(meeting);
-  const payload = {
-    title: meeting.title,
-    scheduledAt: meeting.scheduledAt,
-    durationMinutes: meeting.durationMinutes,
-    publicMeetingUrl,
-  };
   const scheduled = meeting.scheduledAt ? new Date(meeting.scheduledAt).toLocaleString() : 'TBD';
   emails.forEach((to) => {
+    const inviteName = resolveInviteeDisplayName(meeting, to);
+    const personalUrl = getPublicMeetingUrl(meeting.meetingId, { name: inviteName, email: to });
+    const payload = {
+      title: meeting.title,
+      scheduledAt: meeting.scheduledAt,
+      durationMinutes: meeting.durationMinutes,
+      publicMeetingUrl: personalUrl,
+    };
     sendMeetingInvitationEmail(to, payload).catch((err) => {
       logger.warn(`Failed to send meeting invitation to ${to}:`, err?.message || err);
     });
@@ -100,7 +134,7 @@ const createMeeting = async (body, userId) => {
         type: 'meeting',
         title: meeting.title || 'Meeting invitation',
         message: `Scheduled: ${scheduled}`,
-        link: publicMeetingUrl,
+        link: personalUrl,
       }).catch(() => {});
     }).catch(() => {});
   });
@@ -353,34 +387,37 @@ const resendMeetingInvitations = async (id) => {
   if (!meeting) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Meeting not found');
   }
-  const publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
   const emails = getInvitationEmails(meeting);
-  const payload = {
-    title: meeting.title,
-    scheduledAt: meeting.scheduledAt,
-    durationMinutes: meeting.durationMinutes,
-    publicMeetingUrl,
-  };
   const scheduled = meeting.scheduledAt ? new Date(meeting.scheduledAt).toLocaleString() : 'TBD';
   let sent = 0;
   const { notifyByEmail } = await import('./notification.service.js');
   await Promise.all(
-    emails.map((to) =>
-      sendMeetingInvitationEmail(to, payload)
+    emails.map((to) => {
+      const inviteName = resolveInviteeDisplayName(meeting, to);
+      const personalUrl = getPublicMeetingUrl(meeting.meetingId, { name: inviteName, email: to });
+      const payload = {
+        title: meeting.title,
+        scheduledAt: meeting.scheduledAt,
+        durationMinutes: meeting.durationMinutes,
+        publicMeetingUrl: personalUrl,
+      };
+      return sendMeetingInvitationEmail(to, payload)
         .then(() => {
           sent += 1;
         })
         .catch((err) => {
           logger.warn(`Failed to send meeting invitation to ${to}:`, err?.message || err);
-        })
-    )
+        });
+    })
   );
   emails.forEach((to) => {
+    const inviteName = resolveInviteeDisplayName(meeting, to);
+    const personalUrl = getPublicMeetingUrl(meeting.meetingId, { name: inviteName, email: to });
     notifyByEmail(to, {
       type: 'meeting',
       title: meeting.title || 'Meeting invitation',
       message: `Scheduled: ${scheduled}`,
-      link: publicMeetingUrl,
+      link: personalUrl,
     }).catch(() => {});
   });
   return { sent };
@@ -494,11 +531,12 @@ export const sendUpcomingMeetingReminders = async () => {
     if (meetingReminderSentIds.has(idStr)) continue;
     meetingReminderSentIds.add(idStr);
     const emails = getInvitationEmails(m);
-    const publicUrl = getPublicMeetingUrl(m.meetingId);
     const title = m.title || 'Meeting';
     const message = `Your meeting "${title}" starts in 15 minutes.`;
     const remindedUserIds = new Set();
     for (const email of emails) {
+      const inviteName = resolveInviteeDisplayName(m, email);
+      const publicUrl = getPublicMeetingUrl(m.meetingId, { name: inviteName, email });
       const user = await User.findOne({ email: new RegExp(`^${String(email).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'i') })
         .select('_id')
         .lean();

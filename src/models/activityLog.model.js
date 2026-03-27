@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import config from '../config/config.js';
 import paginate from './plugins/paginate.plugin.js';
 
 /**
@@ -62,6 +63,9 @@ activityLogSchema.index({ createdAt: -1 });
 activityLogSchema.index({ actor: 1, createdAt: -1 });
 activityLogSchema.index({ entityType: 1, entityId: 1 });
 activityLogSchema.index({ action: 1, createdAt: -1 });
+if (config.activityLog?.ttlSeconds > 0) {
+  activityLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: config.activityLog.ttlSeconds });
+}
 activityLogSchema.plugin(paginate);
 
 activityLogSchema.set('toJSON', {

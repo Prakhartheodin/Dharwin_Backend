@@ -24,6 +24,26 @@ const getUtcMidnight = (d) => {
 const getDayName = (date) => DAY_NAMES[date.getUTCDay()];
 
 /**
+ * Lower bound for listing/statistics: never include days before the student's joining date.
+ * The UI sends startDate as the first day of the visible month, which would otherwise
+ * override joiningDate and show pre-join punches (e.g. joining 05-Jan-26 but calendar Dec-25).
+ * @param {string|Date|undefined|null} requestedStart - query startDate
+ * @param {Date|null|undefined} joiningDate - Student.joiningDate
+ * @returns {Date|null}
+ */
+const effectiveListStartDate = (requestedStart, joiningDate) => {
+  const req =
+    requestedStart !== undefined && requestedStart !== null && requestedStart !== ''
+      ? getUtcMidnight(requestedStart)
+      : null;
+  const join = joiningDate ? getUtcMidnight(joiningDate) : null;
+  if (req && join) {
+    return req.getTime() >= join.getTime() ? req : join;
+  }
+  return req || join;
+};
+
+/**
  * Get all UTC-midnight dates for a holiday (single day or range [date, endDate] inclusive).
  * @param {{ date: Date, endDate?: Date | null }} holiday
  * @returns {Date[]}
@@ -230,11 +250,7 @@ const listByStudent = async (studentId, query = {}) => {
   const filter = { student: studentId, isActive: true };
 
   filter.date = {};
-  const effectiveStart = startDate
-    ? getUtcMidnight(startDate)
-    : student.joiningDate
-      ? getUtcMidnight(student.joiningDate)
-      : null;
+  const effectiveStart = effectiveListStartDate(startDate, student.joiningDate);
   if (effectiveStart) filter.date.$gte = effectiveStart;
   filter.date.$lte = endDate ? getUtcMidnight(endDate) : getUtcMidnight(new Date());
 
@@ -305,11 +321,7 @@ const getStatistics = async (studentId, query = {}) => {
   const filter = { student: studentId, isActive: true, punchOut: { $ne: null } };
   if (startDate || endDate || student.joiningDate) {
     filter.date = {};
-    const effectiveStart = startDate
-      ? getUtcMidnight(startDate)
-      : student.joiningDate
-        ? getUtcMidnight(student.joiningDate)
-        : null;
+    const effectiveStart = effectiveListStartDate(startDate, student.joiningDate);
     if (effectiveStart) filter.date.$gte = effectiveStart;
     if (endDate) filter.date.$lte = getUtcMidnight(endDate);
   }

@@ -37,7 +37,7 @@ import {
 import { importCandidatesFromExcel } from '../services/candidateExcel.service.js';
 import { sendCandidateProfileShareEmail, sendEmail } from '../services/email.service.js';
 import { logActivity } from '../services/recruiterActivity.service.js';
-import { userHasRecruiterRole } from '../utils/roleHelpers.js';
+import { userHasRecruiterRole, userIsAgent } from '../utils/roleHelpers.js';
 import { getUserPermissionContext } from '../services/permission.service.js';
 import logger from '../config/logger.js';
 import { dispatchSopRemindersForOpenCandidates } from '../services/sopReminder.service.js';
@@ -164,7 +164,14 @@ const list = catchAsync(async (req, res) => {
     'includeOpenSopCount',
   ]);
   if (!req.user.canManageCandidates) {
-    filter.owner = req.user._id;
+    // Non-managers: default to "my" candidate profile (owner = self). Agents use assignedAgent instead —
+    // otherwise owner=self + Candidate-role owner filter returns no rows (agents are not Candidate owners).
+    const isAgent = await userIsAgent(req.user);
+    if (isAgent) {
+      filter.agentIds = String(req.user._id);
+    } else {
+      filter.owner = req.user._id;
+    }
   }
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await queryCandidates(filter, options);

@@ -46,76 +46,91 @@ router.get(
 
 router.use(auth());
 
-router.get('/accounts', validate(emailValidation.listGmailAccounts), emailController.listGmailAccounts);
-router.get('/auth/google', validate(emailValidation.getGoogleAuthUrl), emailController.getGoogleAuthUrl);
-router.delete('/accounts/:id', validate(emailValidation.disconnectAccount), emailController.disconnectGmailAccount);
+router.get('/accounts', requirePermissions('emails.read'), validate(emailValidation.listGmailAccounts), emailController.listGmailAccounts);
+router.get('/auth/google', requirePermissions('emails.manage'), validate(emailValidation.getGoogleAuthUrl), emailController.getGoogleAuthUrl);
+router.delete(
+  '/accounts/:id',
+  requirePermissions('emails.manage'),
+  validate(emailValidation.disconnectAccount),
+  emailController.disconnectGmailAccount
+);
 
-router.get('/messages', validate(emailValidation.listMessages), emailController.listMessages);
-router.get('/threads', validate(emailValidation.listThreads), emailController.listThreads);
-router.get('/threads/:id', validate(emailValidation.getThread), emailController.getThread);
+router.get('/messages', requirePermissions('emails.read'), validate(emailValidation.listMessages), emailController.listMessages);
+router.get('/threads', requirePermissions('emails.read'), validate(emailValidation.listThreads), emailController.listThreads);
+router.get('/threads/:id', requirePermissions('emails.read'), validate(emailValidation.getThread), emailController.getThread);
 router.post(
   '/messages/batch-modify',
+  requirePermissions('emails.manage'),
   validate(emailValidation.batchModifyMessages),
   emailController.batchModifyMessages
 );
 router.post(
   '/threads/batch-modify',
+  requirePermissions('emails.manage'),
   validate(emailValidation.batchModifyThreads),
   emailController.batchModifyThreads
 );
 router.post(
   '/threads/trash',
+  requirePermissions('emails.manage'),
   validate(emailValidation.trashThreads),
   emailController.trashThreads
 );
-router.get('/messages/:id', validate(emailValidation.getMessage), emailController.getMessage);
+router.get('/messages/:id', requirePermissions('emails.read'), validate(emailValidation.getMessage), emailController.getMessage);
 router.get(
   '/messages/:messageId/attachments/:attachmentId',
+  requirePermissions('emails.read'),
   validate(emailValidation.getAttachment),
   emailController.getAttachment
 );
-router.post('/messages/send', validate(emailValidation.sendMessage), emailController.sendMessage);
-router.post('/messages/:id/reply', validate(emailValidation.replyMessage), emailController.replyMessage);
-router.post('/messages/:id/forward', validate(emailValidation.forwardMessage), emailController.forwardMessage);
-router.patch('/messages/:id', validate(emailValidation.modifyMessage), emailController.modifyMessage);
-router.delete('/messages/:id', validate(emailValidation.deleteMessage), emailController.deleteMessage);
+router.post('/messages/send', requirePermissions('emails.manage'), validate(emailValidation.sendMessage), emailController.sendMessage);
+router.post('/messages/:id/reply', requirePermissions('emails.manage'), validate(emailValidation.replyMessage), emailController.replyMessage);
+router.post('/messages/:id/forward', requirePermissions('emails.manage'), validate(emailValidation.forwardMessage), emailController.forwardMessage);
+router.patch('/messages/:id', requirePermissions('emails.manage'), validate(emailValidation.modifyMessage), emailController.modifyMessage);
+router.delete('/messages/:id', requirePermissions('emails.manage'), validate(emailValidation.deleteMessage), emailController.deleteMessage);
 
-router.get('/labels', validate(emailValidation.listLabels), emailController.listLabels);
-router.post('/labels', validate(emailValidation.createLabel), emailController.createLabel);
+router.get('/labels', requirePermissions('emails.read'), validate(emailValidation.listLabels), emailController.listLabels);
+router.post('/labels', requirePermissions('emails.manage'), validate(emailValidation.createLabel), emailController.createLabel);
 
 // Agent-only: personal email templates & signature (Gmail + Outlook compose use same prefs)
 router.get(
   '/templates',
+  requirePermissions('emails.read'),
   requireRoleByName('Agent'),
   validate(emailValidation.listEmailTemplates),
   emailPreferencesController.listTemplates
 );
 router.post(
   '/templates',
+  requirePermissions('emails.manage'),
   requireRoleByName('Agent'),
   validate(emailValidation.createEmailTemplate),
   emailPreferencesController.createTemplate
 );
 router.patch(
   '/templates/:templateId',
+  requirePermissions('emails.manage'),
   requireRoleByName('Agent'),
   validate(emailValidation.updateEmailTemplate),
   emailPreferencesController.updateTemplate
 );
 router.delete(
   '/templates/:templateId',
+  requirePermissions('emails.manage'),
   requireRoleByName('Agent'),
   validate(emailValidation.deleteEmailTemplate),
   emailPreferencesController.deleteTemplate
 );
 router.get(
   '/signature',
+  requirePermissions('emails.read'),
   requireRoleByName('Agent'),
   validate(emailValidation.getEmailSignature),
   emailPreferencesController.getSignature
 );
 router.patch(
   '/signature',
+  requirePermissions('emails.manage'),
   requireRoleByName('Agent'),
   validate(emailValidation.patchEmailSignature),
   emailPreferencesController.patchSignature

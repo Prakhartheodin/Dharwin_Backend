@@ -157,6 +157,7 @@ const getTokenPublic = catchAsync(async (req, res) => {
     participantName: name,
     participantIdentity,
     isHost,
+    canPublish: isHost,
   });
 });
 

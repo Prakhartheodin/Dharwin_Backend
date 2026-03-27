@@ -1,3 +1,8 @@
+/**
+ * Notifications are intentionally protected by auth() only: every active user receives
+ * their own notification stream; handlers scope all queries by req.user (see notification.controller).
+ * There is no separate matrix permission to avoid blocking core app alerts for minimal roles.
+ */
 import express from 'express';
 import auth from '../../middlewares/auth.js';
 import validate from '../../middlewares/validate.js';

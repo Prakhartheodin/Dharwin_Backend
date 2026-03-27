@@ -1,5 +1,6 @@
 import Role from '../models/role.model.js';
 import User from '../models/user.model.js';
+import config from '../config/config.js';
 
 /**
  * Derive API permissions from raw domain permissions using a single rule:
@@ -102,9 +103,11 @@ const getUserPermissionContext = async (user) => {
  * Used by GET /auth/my-permissions to avoid requiring roles.read to list roles.
  *
  * @param {import('../models/user.model.js').default} user
- * @returns {Promise<{ permissions: string[], roleNames: string[], isAdministrator: boolean }>}
+ * @returns {Promise<{ permissions: string[], roleNames: string[], isAdministrator: boolean, isDesignatedSuperadmin: boolean }>}
  */
 const getMyPermissionsForFrontend = async (user) => {
+  const isDesignatedSuperadmin = config.isDesignatedSuperadminEmail(user?.email);
+
   if (user?.platformSuperUser) {
     const rawPermissions = await getAllActiveRolesRawPermissions();
     const roleIds = user?.roleIds || [];
@@ -117,17 +120,18 @@ const getMyPermissionsForFrontend = async (user) => {
       roleNames,
       isAdministrator: true,
       isPlatformSuperUser: true,
+      isDesignatedSuperadmin,
     };
   }
 
   const roleIds = user?.roleIds || [];
   if (!roleIds.length) {
-    return { permissions: [], roleNames: [], isAdministrator: false, isPlatformSuperUser: false };
+    return { permissions: [], roleNames: [], isAdministrator: false, isPlatformSuperUser: false, isDesignatedSuperadmin };
   }
 
   const roles = await Role.find({ _id: { $in: roleIds }, status: 'active' }).lean();
   if (!roles.length) {
-    return { permissions: [], roleNames: [], isAdministrator: false, isPlatformSuperUser: false };
+    return { permissions: [], roleNames: [], isAdministrator: false, isPlatformSuperUser: false, isDesignatedSuperadmin };
   }
 
   const rawPermissions = collectRawPermissionsFromRoles(roles);
@@ -139,6 +143,7 @@ const getMyPermissionsForFrontend = async (user) => {
     roleNames,
     isAdministrator,
     isPlatformSuperUser: false,
+    isDesignatedSuperadmin,
   };
 };
 

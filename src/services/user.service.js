@@ -47,8 +47,17 @@ const createUser = async (userBody, options = {}) => {
  * @returns {Promise<QueryResult>}
  */
 const queryUsers = async (filter, options, requester = null) => {
-  const { search, ...restFilter } = filter;
+  const { search, role, ...restFilter } = filter;
   const mongoFilter = { ...restFilter };
+  if (role === 'recruiter') {
+    const Role = (await import('../models/role.model.js')).default;
+    const recruiterRole = await Role.findOne({ name: 'Recruiter', status: 'active' }).select('_id').lean();
+    if (recruiterRole?._id) {
+      mongoFilter.roleIds = recruiterRole._id;
+    } else {
+      mongoFilter._id = { $in: [] };
+    }
+  }
   if (search && search.trim()) {
     const trimmed = search.trim();
     const searchRegex = new RegExp(trimmed.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');

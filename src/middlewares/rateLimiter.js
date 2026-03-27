@@ -15,8 +15,18 @@ const attendancePunchLimiter = rateLimit({
   message: { message: 'Too many punch requests. Please try again in a minute.' },
 });
 
+/** Anonymous/authenticated job browse (GET /jobs/browse, GET /jobs/browse/:id) — per IP */
+const jobsBrowseLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: config.rateLimit.jobsBrowsePerMinute ?? 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again shortly.' },
+});
+
 export {
   authLimiter,
   attendancePunchLimiter,
+  jobsBrowseLimiter,
 };
 

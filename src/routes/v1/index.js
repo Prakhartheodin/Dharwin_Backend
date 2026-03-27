@@ -51,6 +51,17 @@ import emailRoute from './email.route.js';
 import outlookRoute from './outlook.route.js';
 import supportTicketRoute from './supportTicket.route.js';
 import fileStorageRoute from './fileStorage.route.js';
+import supportCameraInviteRoute from './supportCameraInvite.route.js';
+
+/**
+ * RBAC inventory: Most mounted routers use requirePermissions (see each *.route.js).
+ * Intentionally not using matrix permissions on the router as a whole:
+ * - /public — unauthenticated registration and similar
+ * - /webhooks — external provider callbacks
+ * - /docs — Swagger UI (deploy behind network controls)
+ * - /notifications — auth only; all operations scoped to req.user (see notification.route.js)
+ * - OAuth callback paths on email/outlook routes — no session until after redirect
+ */
 
 const router = express.Router();
 
@@ -254,6 +265,10 @@ const defaultRoutes = [
   {
     path: '/file-storage',
     route: fileStorageRoute,
+  },
+  {
+    path: '/platform/support-camera-invites',
+    route: supportCameraInviteRoute,
   },
 ];
 

@@ -90,6 +90,10 @@ const envVarsSchema = Joi.object()
     // Auth rate limit (deployed apps often share IPs; increase to avoid 429 on sign-in)
     RATE_LIMIT_AUTH_WINDOW_MINUTES: Joi.number().optional().default(15).description('Auth rate limit window in minutes'),
     RATE_LIMIT_AUTH_MAX: Joi.number().optional().default(500).description('Max failed auth requests per window per IP'),
+    RATE_LIMIT_JOBS_BROWSE_PER_MINUTE: Joi.number()
+      .optional()
+      .default(120)
+      .description('Max GET /jobs/browse (and detail) requests per IP per minute'),
 
     // Reverse proxy: Express req.ip / X-Forwarded-For (activity logs geo, rate limits, secure cookies)
     TRUST_PROXY_HOPS: Joi.number()
@@ -101,6 +105,18 @@ const envVarsSchema = Joi.object()
       .description(
         'Number of trusted reverse-proxy hops (0=off). Use 1 behind a single nginx/ALB/Cloudflare in front of Node. See Express "behind proxies" guide.'
       ),
+
+    /** When > 0, MongoDB TTL index deletes ActivityLog documents `expireAfterSeconds` after createdAt (monitor runs ~60s). 0 = disabled. */
+    ACTIVITY_LOG_TTL_SECONDS: Joi.number().integer().min(0).optional().default(0),
+
+    /**
+     * Comma-separated emails: sole accounts for Activity Logs API/UI and support camera invites.
+     * When unset or empty, defaults to harvinder@superadmin.in for backward-compatible single-tenant setups.
+     */
+    DESIGNATED_SUPERADMIN_EMAILS: Joi.string()
+      .optional()
+      .allow('')
+      .description('Comma-separated operator emails for activity logs + support camera'),
   })
   .unknown();
 
@@ -109,6 +125,17 @@ const { value: envVars, error } = envVarsSchema.prefs({ errors: { label: 'key' }
 if (error) {
   throw new Error(`Config validation error: ${error.message}`);
 }
+
+const designatedSuperadminRaw = (envVars.DESIGNATED_SUPERADMIN_EMAILS ?? '').trim();
+const designatedSuperadminEmails = (designatedSuperadminRaw || 'harvinder@superadmin.in')
+  .split(',')
+  .map((e) => e.trim().toLowerCase())
+  .filter(Boolean);
+
+const isDesignatedSuperadminEmail = (email) => {
+  if (!email || typeof email !== 'string') return false;
+  return designatedSuperadminEmails.includes(email.trim().toLowerCase());
+};
 
 const resolvedBackendPublicUrl = (
   envVars.BACKEND_PUBLIC_URL ||
@@ -236,11 +263,17 @@ const config = {
   rateLimit: {
     authWindowMinutes: envVars.RATE_LIMIT_AUTH_WINDOW_MINUTES ?? 15,
     authMax: envVars.RATE_LIMIT_AUTH_MAX ?? 500,
+    jobsBrowsePerMinute: envVars.RATE_LIMIT_JOBS_BROWSE_PER_MINUTE ?? 120,
   },
   /** Express `trust proxy` hop count; 0 leaves default (do not trust X-Forwarded-For). */
   trustProxyHops: envVars.TRUST_PROXY_HOPS ?? 0,
   /** In-app SOP reminders after candidate/training updates; set NOTIFY_SOP_REMINDERS=0 to disable. */
   notifySopReminders: process.env.NOTIFY_SOP_REMINDERS !== '0' && process.env.NOTIFY_SOP_REMINDERS !== 'false',
+  activityLog: {
+    ttlSeconds: envVars.ACTIVITY_LOG_TTL_SECONDS ?? 0,
+  },
+  designatedSuperadminEmails,
+  isDesignatedSuperadminEmail,
 };
 
 // Production: warn if email/share links would use localhost

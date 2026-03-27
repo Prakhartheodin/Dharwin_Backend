@@ -10,12 +10,21 @@ export const permissionAliases = {
   'activityLogs.read': ['activityLogs.read', 'activity.read'],
   'activityLogs.manage': ['activityLogs.manage', 'activity.manage'],
   // Training modules / modules: route uses "modules.manage", permission may be "training.modules.manage"
-  'modules.read': ['modules.read', 'training.modules.read', 'training.modules:view', 'training.modules:view,create,edit,delete'],
+  // Training evaluation UI uses training.evaluation:* → evaluation.read/manage; evaluation API historically required modules.read
+  'modules.read': [
+    'modules.read',
+    'training.modules.read',
+    'training.modules:view',
+    'training.modules:view,create,edit,delete',
+    'evaluation.read',
+    'evaluation.manage',
+  ],
   'modules.manage': [
     'modules.manage',
     'training.modules.manage',
     'training.modules:create,edit,delete',
     'training.modules:view,create,edit,delete',
+    'evaluation.manage',
   ],
   'training.modules.read': ['training.modules.read', 'training.modules:view', 'training.modules:view,create,edit,delete'],
   'training.modules.manage': [
@@ -41,7 +50,14 @@ export const permissionAliases = {
   // Attendance assignment (holidays, leave, regularize, week-off): admins (students.manage) OR agents (attendance.manage)
   'attendance.assign': ['students.manage', 'attendance.manage'],
   // ATS candidates: ats.candidates:view -> candidates.read, ats.candidates:create,edit,delete -> candidates.manage
-  'candidates.read': ['candidates.read', 'ats.candidates:view', 'ats.candidates:view,create,edit,delete'],
+  // Interview scheduling needs candidate picklist for agents who only have ats.interviews.*
+  'candidates.read': [
+    'candidates.read',
+    'ats.candidates:view',
+    'ats.candidates:view,create,edit,delete',
+    'interviews.read',
+    'interviews.manage',
+  ],
   'candidates.manage': ['candidates.manage', 'ats.candidates:view,create,edit,delete'],
   // Joining date PATCH: full manage OR granular ats.candidates.joiningDate:view,edit → candidates.joiningDate.manage
   'candidates.joiningDate': [
@@ -57,7 +73,7 @@ export const permissionAliases = {
     'candidates.resignDate.manage',
     'ats.candidates:view,create,edit,delete',
   ],
-  // Positions: used in candidates (onboarding) and training (student assignment)
+  // Positions: training.positions:* derives to positions.read/manage; these aliases cover legacy indirect grants
   'positions.read': ['positions.read', 'students.read', 'candidates.read', 'users.manage'],
   'positions.manage': ['positions.manage', 'students.manage', 'candidates.manage', 'users.manage'],
   // ATS analytics: derived permission is analytics.read; admins/recruiters with ATS access also get in
@@ -77,9 +93,20 @@ export const permissionAliases = {
   // ATS offers: map ats.offers:* to candidates (offers are part of ATS pipeline)
   'offers.read': ['offers.read', 'ats.offers:view', 'ats.offers:view,create,edit,delete', 'candidates.read', 'candidates.manage'],
   'offers.manage': ['offers.manage', 'ats.offers:create,edit,delete', 'ats.offers:view,create,edit,delete', 'candidates.manage'],
-  // Meetings (communication.meetings)
-  'meetings.read': ['meetings.read', 'communication.meetings:view', 'communication.meetings:view,create,edit,delete'],
-  'meetings.manage': ['meetings.manage', 'communication.meetings:create,edit,delete', 'communication.meetings:view,create,edit,delete'],
+  // Meetings (communication.meetings). ATS Interviews (ats.interviews → interviews.read/manage) uses same meeting APIs.
+  'meetings.read': [
+    'meetings.read',
+    'communication.meetings:view',
+    'communication.meetings:view,create,edit,delete',
+    'interviews.read',
+    'interviews.manage',
+  ],
+  'meetings.manage': [
+    'meetings.manage',
+    'communication.meetings:create,edit,delete',
+    'communication.meetings:view,create,edit,delete',
+    'interviews.manage',
+  ],
   // Calls (bolna, communication) - from communication.calling
   // permission.service derives communication.calling:view → calling.read; we must grant calls.* via calling.* too
   'calls.read': ['calls.read', 'calling.read', 'communication.calling:view', 'communication.calling:view,create,edit,delete'],
@@ -93,10 +120,45 @@ export const permissionAliases = {
   // My Profile (ats.my-profile:view → my-profile.read)
   'my-profile.read': ['my-profile.read', 'ats.my-profile:view', 'ats.my-profile:view,create,edit,delete'],
   'my-profile.manage': ['my-profile.manage', 'ats.my-profile:create,edit,delete', 'ats.my-profile:view,create,edit,delete'],
+  // ATS jobs: list for interview scheduling modal (agents often have interviews.* only)
+  'jobs.read': [
+    'jobs.read',
+    'ats.jobs:view',
+    'ats.jobs:view,create,edit,delete',
+    'interviews.read',
+    'interviews.manage',
+  ],
+  // User directory list (GET /users) — interview roles need recruiter dropdown without full admin
+  'users.read': ['users.read', 'users.manage', 'interviews.read', 'interviews.manage'],
   // Recruiters
   'recruiters.read': ['recruiters.read', 'ats.recruiters:view', 'ats.recruiters:view,create,edit,delete'],
   'chats.read': ['chats.read', 'communication.chats:view', 'communication.chats:view,create,edit,delete'],
   'chats.manage': ['chats.manage', 'communication.chats:create,edit,delete', 'communication.chats:view,create,edit,delete'],
+  // Email / Outlook (communication.emails:* → emails.read / emails.manage in auth context)
+  'emails.read': ['emails.read', 'communication.emails:view', 'communication.emails:view,create,edit,delete'],
+  'emails.manage': ['emails.manage', 'communication.emails:create,edit,delete', 'communication.emails:view,create,edit,delete'],
+  // File manager API (communication.files-storage:* → files-storage.read / files-storage.manage)
+  'files-storage.read': ['files-storage.read', 'communication.files-storage:view', 'communication.files-storage:view,create,edit,delete'],
+  'files-storage.manage': [
+    'files-storage.manage',
+    'communication.files-storage:create,edit,delete',
+    'communication.files-storage:view,create,edit,delete',
+  ],
+  // Generic S3 single upload used by candidates, profile, training flows
+  'uploads.document': [
+    'candidates.manage',
+    'files-storage.manage',
+    'my-profile.manage',
+    'students.manage',
+    'jobs.manage',
+    'projects.manage',
+    'tasks.manage',
+    'offers.manage',
+    'recruiters.manage',
+    'modules.manage',
+    'teams.manage',
+    'users.manage',
+  ],
   // Support tickets: support.tickets:view → tickets.read, support.tickets:create,edit,delete → tickets.manage
   'supportTickets.read': [
     'supportTickets.read',

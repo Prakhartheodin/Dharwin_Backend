@@ -23,11 +23,12 @@ if (!MONGODB_URL) {
 }
 
 const AGENT_ROLE_NAME = 'Agent';
-/** Attendance + edit candidate joining / resign dates (syncs with Student for punch eligibility). */
+/** Attendance + candidate dates + schedule/list interviews (same APIs as communication.meetings; see permissions.js aliases). */
 const AGENT_PERMISSIONS = [
   'training.attendance:view,create,edit',
   'ats.candidates.joiningDate:view,edit',
   'ats.candidates.resignDate:view,edit',
+  'ats.interviews:view,create,edit,delete',
 ];
 
 async function run() {

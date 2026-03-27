@@ -95,6 +95,11 @@ const meetingSchema = mongoose.Schema(
       default: '',
     },
     // --- System ---
+    /** LiveKit participant identities granted publish after host admit (survives API restarts / multi-instance) */
+    admittedIdentities: {
+      type: [String],
+      default: [],
+    },
     status: {
       type: String,
       enum: ['scheduled', 'ended', 'cancelled'],

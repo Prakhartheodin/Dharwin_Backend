@@ -180,6 +180,30 @@ const emitIncomingCall = async (conversationId, callData) => {
   }
 };
 
+/**
+ * Targeted incoming “call” UI for support camera invites (same client handlers as chat calls).
+ * @param {string} targetUserId
+ * @param {{ token: string, roomName: string, caller: { id: string, name?: string, email?: string } }} payload
+ */
+const emitSupportCameraIncomingCall = (targetUserId, payload) => {
+  if (!io || !targetUserId || !payload?.token || !payload?.roomName || !payload?.caller) return;
+  const token = String(payload.token);
+  const callData = {
+    callSource: 'support_camera',
+    supportInviteToken: token,
+    roomName: payload.roomName,
+    callType: 'video',
+    conversationId: '',
+    callId: `sc-${token.slice(0, 24)}`,
+    caller: {
+      id: String(payload.caller.id),
+      name: payload.caller.name || 'Platform support',
+      ...(payload.caller.email ? { email: payload.caller.email } : {}),
+    },
+  };
+  io.to(`user:${String(targetUserId)}`).emit('incoming_call', callData);
+};
+
 const isUserOnline = (userId) => onlineUsers.has(userId) && onlineUsers.get(userId).size > 0;
 
 const getIO = () => io;
@@ -216,4 +240,16 @@ const emitConversationDeleted = (conversationId, participantIds) => {
   });
 };
 
-export { initSocket, emitNewMessage, emitIncomingCall, emitCallEnded, emitMessageDeleted, emitMessageReacted, emitConversationUpdated, emitConversationDeleted, isUserOnline, getIO };
+export {
+  initSocket,
+  emitNewMessage,
+  emitIncomingCall,
+  emitSupportCameraIncomingCall,
+  emitCallEnded,
+  emitMessageDeleted,
+  emitMessageReacted,
+  emitConversationUpdated,
+  emitConversationDeleted,
+  isUserOnline,
+  getIO,
+};

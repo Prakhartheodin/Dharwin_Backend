@@ -22,6 +22,7 @@
     "seed:managers": "node scripts/seed-managers.js",
     "seed:preboarding": "node scripts/seed-preboarding.js",
     "seed:candidate-role": "node scripts/seed-candidate-role.js",
+    "seed:recruiter-role": "node scripts/seed-recruiter-role.js",
     "clean:import": "node scripts/clean-and-import-db.js",
     "cleanup:offers-placements": "node scripts/cleanup-offers-placements.js",
     "simulate:email-links": "node scripts/simulate-email-links.mjs",
@@ -29,7 +30,8 @@
     "docker:livekit:down": "docker compose -f docker-compose.livekit-local.yml down",
     "docker:livekit:full": "docker compose -f livekit/docker-compose.yml up -d",
     "docker:livekit:full:down": "docker compose -f livekit/docker-compose.yml down",
-    "provision:platform-super": "node scripts/provision-platform-super-user.js"
+    "provision:platform-super": "node scripts/provision-platform-super-user.js",
+    "verify:permissions": "node scripts/verify-permission-aliases.mjs"
   },
   "keywords": [
     "node",
@@ -62,7 +64,7 @@
     "compression": "^1.7.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
-    "cross-env": "^7.0.0",
+    "cross-env": "^7.0.3",
     "dotenv": "^10.0.0",
     "express": "^4.17.1",
     "express-mongo-sanitize": "^2.0.0",

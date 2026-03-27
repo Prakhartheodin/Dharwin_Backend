@@ -1,5 +1,7 @@
 import express from 'express';
 import auth from '../../middlewares/auth.js';
+import optionalAuth from '../../middlewares/optionalAuth.js';
+import { jobsBrowseLimiter } from '../../middlewares/rateLimiter.js';
 import validate from '../../middlewares/validate.js';
 import requirePermissions from '../../middlewares/requirePermissions.js';
 import { uploadSingle } from '../../middlewares/upload.js';
@@ -47,11 +49,11 @@ router
 
 router
   .route('/browse')
-  .get(auth(), validate(jobValidation.browseJobs), jobController.browseJobs);
+  .get(jobsBrowseLimiter, optionalAuth(), validate(jobValidation.browseJobs), jobController.browseJobs);
 
 router
   .route('/browse/:jobId')
-  .get(auth(), validate(jobValidation.browseJob), jobController.browseJobById);
+  .get(jobsBrowseLimiter, optionalAuth(), validate(jobValidation.browseJob), jobController.browseJobById);
 
 router
   .route('/browse/:jobId/apply')

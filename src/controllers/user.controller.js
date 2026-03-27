@@ -6,6 +6,7 @@ import * as userService from '../services/user.service.js';
 import * as activityLogService from '../services/activityLog.service.js';
 import { ActivityActions, EntityTypes } from '../config/activityLog.js';
 import { userIsAdmin, userIsAgent, validateRoleIdsForAgent } from '../utils/roleHelpers.js';
+import { pickUserDisplayForActivityLog, buildUserDeleteActivityMetadata } from '../utils/activityLogSubject.util.js';
 
 const PRIVILEGED_USER_FIELDS = ['platformSuperUser', 'hideFromDirectory'];
 
@@ -17,12 +18,19 @@ const createUser = catchAsync(async (req, res) => {
   const user = await userService.createUser(body, {
     allowPrivilegedUserFields: !!req.user?.platformSuperUser,
   });
-  await activityLogService.createActivityLog(req.user.id, ActivityActions.USER_CREATE, EntityTypes.USER, user.id, { roleIds: user.roleIds }, req);
+  await activityLogService.createActivityLog(
+    req.user.id,
+    ActivityActions.USER_CREATE,
+    EntityTypes.USER,
+    user.id,
+    { roleIds: user.roleIds, ...pickUserDisplayForActivityLog(user) },
+    req
+  );
   res.status(httpStatus.CREATED).send(user);
 });
 
 const getUsers = catchAsync(async (req, res) => {
-  const filter = pick(req.query, ['name', 'status', 'search']);
+  const filter = pick(req.query, ['name', 'status', 'search', 'role']);
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await userService.queryUsers(filter, options, req.user);
   res.send(result);
@@ -66,7 +74,7 @@ const updateUser = catchAsync(async (req, res) => {
     }
   }
   const user = await userService.updateUserById(req.params.userId, updateBody);
-  const metadata = {};
+  const metadata = { ...pickUserDisplayForActivityLog(user) };
   if (req.body.status !== undefined) {
     metadata.field = 'status';
     metadata.newValue = req.body.status;
@@ -99,8 +107,22 @@ const deleteUser = catchAsync(async (req, res) => {
       throw new ApiError(httpStatus.BAD_REQUEST, 'Cannot delete the last platform super user account');
     }
   }
+  const deleteAuditMetadata = buildUserDeleteActivityMetadata(target);
+  const auditEntry = await activityLogService.createActivityLog(
+    req.user.id,
+    ActivityActions.USER_DELETE,
+    EntityTypes.USER,
+    req.params.userId,
+    deleteAuditMetadata,
+    req
+  );
+  if (!auditEntry) {
+    throw new ApiError(
+      httpStatus.INTERNAL_SERVER_ERROR,
+      'Could not record the deletion in the audit log; the user was not deleted.'
+    );
+  }
   await userService.deleteUserById(req.params.userId);
-  await activityLogService.createActivityLog(req.user.id, ActivityActions.USER_DELETE, EntityTypes.USER, req.params.userId, {}, req);
   res.status(httpStatus.NO_CONTENT).send();
 });
 

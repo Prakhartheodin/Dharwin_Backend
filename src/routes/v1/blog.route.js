@@ -3,10 +3,11 @@ import validate from '../../middlewares/validate.js';
 import blogValidation from '../../validations/blog.validation.js';
 import * as blogController from '../../controllers/blog.controller.js';
 import auth from '../../middlewares/auth.js';
+import requirePermissions from '../../middlewares/requirePermissions.js';
 
 const router = express.Router();
 
-router.use(auth());
+router.use(auth(), requirePermissions('modules.manage'));
 
 router.post('/generate', validate(blogValidation.generate), blogController.generate);
 router.post('/generate-stream', validate(blogValidation.generate), blogController.generateStream);

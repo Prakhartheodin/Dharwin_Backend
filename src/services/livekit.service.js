@@ -13,6 +13,7 @@ import ApiError from '../utils/ApiError.js';
 import httpStatus from 'http-status';
 import { getMeetingByMeetingId } from './meeting.service.js';
 import Recording from '../models/recording.model.js';
+import Meeting from '../models/meeting.model.js';
 
 // Initialize LiveKit clients
 // Convert ws:// to http:// for SDK clients (they use HTTP, not WebSocket)
@@ -59,14 +60,30 @@ if (apiKey && apiSecret) {
  */
 const isParticipantHost = async (roomName, participantEmail) => {
   try {
-    const meeting = await getMeetingByMeetingId(roomName);
+    const meeting = await getMeetingByMeetingId(String(roomName || '').trim());
     if (!meeting) {
       return false;
     }
-    
-    // Check if participant email is in hosts array
+
     const emailLower = participantEmail?.toLowerCase().trim();
-    return meeting.hosts?.some(host => host.email?.toLowerCase().trim() === emailLower) || false;
+    if (!emailLower) return false;
+
+    if (meeting.hosts?.some((host) => host.email?.toLowerCase().trim() === emailLower)) {
+      return true;
+    }
+
+    const creator = meeting.createdBy;
+    if (creator && typeof creator === 'object' && creator.email) {
+      if (String(creator.email).toLowerCase().trim() === emailLower) {
+        return true;
+      }
+    }
+
+    if (meeting.recruiter?.email && String(meeting.recruiter.email).toLowerCase().trim() === emailLower) {
+      return true;
+    }
+
+    return false;
   } catch (error) {
     logger.error('Error checking host status:', error);
     return false;
@@ -103,7 +120,11 @@ const generateAccessToken = async ({ roomName, participantName, participantIdent
 
   // Check if participant is a host, has been admitted, or forcing full permissions
   const roomAdmitted = admittedParticipants.get(roomName);
-  const isAdmitted = roomAdmitted?.has(participantIdentity) || false;
+  const dbAdmitted =
+    participantIdentity &&
+    Array.isArray(meeting?.admittedIdentities) &&
+    meeting.admittedIdentities.includes(participantIdentity);
+  const isAdmitted = roomAdmitted?.has(participantIdentity) || dbAdmitted || false;
   const isHost = forceFullPermissions || isAdmitted || (participantEmail ? await isParticipantHost(roomName, participantEmail) : false);
 
   logger.info('[LiveKit] Token grants', { roomName, isHost, isAdmitted, forceFullPermissions });
@@ -128,6 +149,44 @@ const generateAccessToken = async ({ roomName, participantName, participantIdent
   const jwt = await token.toJwt();
   logger.info('[LiveKit] Token generated successfully', { roomName, isHost });
   return { token: jwt, isHost };
+};
+
+/**
+ * LiveKit token for platform support camera sessions (no Meeting document).
+ * Viewer = superadmin (subscribe to AV only; can still send/receive data for chat).
+ * Publisher = invited user (camera/mic + chat).
+ * @param {Object} opts
+ * @param {string} opts.roomName
+ * @param {string} opts.participantName
+ * @param {string} opts.participantIdentity
+ * @param {boolean} opts.asPublisher
+ * @returns {Promise<string>} JWT
+ */
+const generateSupportCameraToken = async ({ roomName, participantName, participantIdentity, asPublisher }) => {
+  if (!apiKey || !apiSecret) {
+    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'LiveKit credentials not configured');
+  }
+  if (!roomName || !participantName) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'roomName and participantName are required');
+  }
+  const token = new AccessToken(apiKey, apiSecret, {
+    identity: participantIdentity || participantName,
+    name: participantName,
+    ttl: '1h',
+  });
+  token.addGrant({
+    room: roomName,
+    roomJoin: true,
+    // Guest publishes camera/mic; viewer (superadmin) is subscribe-only for media.
+    canPublish: !!asPublisher,
+    canSubscribe: true,
+    // In-room chat uses data packets — both sides need this so support can write and the guest can read.
+    canPublishData: true,
+    canUpdateOwnMetadata: true,
+  });
+  const jwt = await token.toJwt();
+  logger.info('[LiveKit] support camera token', { roomName, asPublisher });
+  return jwt;
 };
 
 /**
@@ -380,10 +439,19 @@ const getWaitingParticipants = async (roomName) => {
       return [];
     }
 
+    const meeting = await getMeetingByMeetingId(roomName);
+    const dbAdmitted = new Set(
+      Array.isArray(meeting?.admittedIdentities) ? meeting.admittedIdentities.filter(Boolean) : []
+    );
+    const memAdmitted = admittedParticipants.get(roomName) || new Set();
+
     // Filter participants who cannot publish (waiting room)
-    // ParticipantInfo has permission.canPublish (from LiveKit protocol)
+    // Exclude identities already admitted (DB/memory): LiveKit still shows canPublish=false until they reconnect
     const waitingParticipants = participants
-      .filter(p => {
+      .filter((p) => {
+        if (dbAdmitted.has(p.identity) || memAdmitted.has(p.identity)) {
+          return false;
+        }
         const permission = p.permission;
         if (!permission) {
           return true; // No permission = treat as waiting
@@ -462,6 +530,12 @@ const admitParticipant = async (roomName, participantIdentity, participantName =
     }
     admittedParticipants.get(roomName).add(participantIdentity);
 
+    const meetingIdKey = String(roomName).trim();
+    await Meeting.updateOne(
+      { meetingId: meetingIdKey },
+      { $addToSet: { admittedIdentities: participantIdentity } }
+    ).catch((err) => logger.warn('[LiveKit] Persist admitted identity failed', { roomName: meetingIdKey, participantIdentity, err: err?.message }));
+
     // Generate new token with full permissions (force full permissions for admitted participants)
     const { token } = await generateAccessToken({
       roomName,
@@ -517,7 +591,12 @@ const removeParticipant = async (roomName, participantIdentity) => {
     if (roomAdmitted) {
       roomAdmitted.delete(participantIdentity);
     }
-    
+
+    await Meeting.updateOne(
+      { meetingId: String(roomName).trim() },
+      { $pull: { admittedIdentities: participantIdentity } }
+    ).catch((err) => logger.warn('[LiveKit] Remove admitted identity from DB failed', { roomName, participantIdentity, err: err?.message }));
+
     return {
       identity: participantIdentity,
       removed: true,
@@ -581,7 +660,8 @@ const disconnectAllParticipants = async (roomName) => {
 };
 
 export { 
-  generateAccessToken, 
+  generateAccessToken,
+  generateSupportCameraToken,
   startRecording, 
   stopRecording, 
   getRecordingStatus,

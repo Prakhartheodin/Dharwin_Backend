@@ -72,6 +72,38 @@ const updateRoleById = async (roleId, updateBody) => {
  * @param {ObjectId} roleId
  * @returns {Promise<Role>}
  */
+/** Max display names stored on role.update audit rows (avoids huge metadata). */
+const ROLE_UPDATE_MEMBER_NAMES_LIMIT = 40;
+
+/**
+ * Snapshot of users assigned to a role (for activity log at role update time).
+ * @param {import('mongoose').Types.ObjectId|string} roleId
+ * @returns {Promise<{ roleMemberDisplayNames: string[], roleMemberCount: number, roleMemberNamesTruncated?: boolean }>}
+ */
+const getRoleAssigneeDisplaySnapshot = async (roleId) => {
+  const [roleMemberCount, users] = await Promise.all([
+    User.countDocuments({ roleIds: roleId }),
+    User.find({ roleIds: roleId })
+      .select('name username email')
+      .sort({ name: 1 })
+      .limit(ROLE_UPDATE_MEMBER_NAMES_LIMIT)
+      .lean(),
+  ]);
+  const roleMemberDisplayNames = users
+    .map((u) => {
+      const name = u.name != null ? String(u.name).trim() : '';
+      const username = u.username != null ? String(u.username).trim() : '';
+      const email = u.email != null ? String(u.email).trim() : '';
+      return name || username || email || '';
+    })
+    .filter(Boolean);
+  const out = { roleMemberDisplayNames, roleMemberCount };
+  if (roleMemberCount > ROLE_UPDATE_MEMBER_NAMES_LIMIT) {
+    out.roleMemberNamesTruncated = true;
+  }
+  return out;
+};
+
 const deleteRoleById = async (roleId) => {
   const role = await getRoleById(roleId);
   if (!role) {
@@ -98,4 +130,5 @@ export {
   getRoleByName,
   updateRoleById,
   deleteRoleById,
+  getRoleAssigneeDisplaySnapshot,
 };

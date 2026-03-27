@@ -12,9 +12,15 @@ export const ActivityActions = {
   USER_UPDATE: 'user.update',
   USER_DELETE: 'user.delete',
   USER_DISABLE: 'user.disable',
+  /** Successful sign-in (e.g. POST /auth/login with email/password) */
+  USER_LOGIN: 'user.login',
+  /** Session ended via POST /auth/logout (refresh token revoked) */
+  USER_LOGOUT: 'user.logout',
   // Impersonation
   IMPERSONATION_START: 'impersonation.start',
   IMPERSONATION_END: 'impersonation.end',
+  /** Platform super user invited a user to a consent-based live camera support session */
+  SUPPORT_CAMERA_INVITE: 'supportCamera.invite',
   // Categories
   CATEGORY_CREATE: 'category.create',
   CATEGORY_UPDATE: 'category.update',

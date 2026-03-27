@@ -34,16 +34,21 @@ const loginUserWithEmailAndPassword = async (email, password) => {
 };
 
 /**
- * Logout
+ * Logout — deletes refresh token doc. Returns user id for audit logging.
  * @param {string} refreshToken
- * @returns {Promise}
+ * @returns {Promise<string>} User id (string) who owned the refresh token
  */
 const logout = async (refreshToken) => {
   const refreshTokenDoc = await Token.findOne({ token: refreshToken, type: tokenTypes.REFRESH, blacklisted: false });
   if (!refreshTokenDoc) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Not found');
   }
+  const userId = refreshTokenDoc.user != null ? String(refreshTokenDoc.user) : null;
   await refreshTokenDoc.deleteOne();
+  if (!userId) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Not found');
+  }
+  return userId;
 };
 
 /**
