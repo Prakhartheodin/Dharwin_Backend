@@ -36,6 +36,11 @@ const tokenSchema = mongoose.Schema(
       type: String,
       default: null,
     },
+    /** Optional SPA-reported public IP at refresh-token creation (login / refresh). */
+    clientIp: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,

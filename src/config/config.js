@@ -106,6 +106,9 @@ const envVarsSchema = Joi.object()
         'Number of trusted reverse-proxy hops (0=off). Use 1 behind a single nginx/ALB/Cloudflare in front of Node. See Express "behind proxies" guide.'
       ),
 
+    /** If "true" or "1", Express trust proxy is enabled as boolean (all hops). Prefer TRUST_PROXY_HOPS for a fixed count. */
+    TRUST_PROXY: Joi.string().valid('true', 'false', '1', '0', '').optional().allow(null).empty(''),
+
     /** When > 0, MongoDB TTL index deletes ActivityLog documents `expireAfterSeconds` after createdAt (monitor runs ~60s). 0 = disabled. */
     ACTIVITY_LOG_TTL_SECONDS: Joi.number().integer().min(0).optional().default(0),
 
@@ -136,6 +139,11 @@ const isDesignatedSuperadminEmail = (email) => {
   if (!email || typeof email !== 'string') return false;
   return designatedSuperadminEmails.includes(email.trim().toLowerCase());
 };
+
+const trustProxyFlagRaw = String(envVars.TRUST_PROXY ?? '')
+  .trim()
+  .toLowerCase();
+const trustProxy = trustProxyFlagRaw === 'true' || trustProxyFlagRaw === '1';
 
 const resolvedBackendPublicUrl = (
   envVars.BACKEND_PUBLIC_URL ||
@@ -265,8 +273,10 @@ const config = {
     authMax: envVars.RATE_LIMIT_AUTH_MAX ?? 500,
     jobsBrowsePerMinute: envVars.RATE_LIMIT_JOBS_BROWSE_PER_MINUTE ?? 120,
   },
-  /** Express `trust proxy` hop count; 0 leaves default (do not trust X-Forwarded-For). */
+  /** Express `trust proxy` hop count; 0 leaves default (do not trust X-Forwarded-For). Takes precedence over `trustProxy`. */
   trustProxyHops: envVars.TRUST_PROXY_HOPS ?? 0,
+  /** When true and trustProxyHops is 0: `app.set('trust proxy', true)`. */
+  trustProxy,
   /** In-app SOP reminders after candidate/training updates; set NOTIFY_SOP_REMINDERS=0 to disable. */
   notifySopReminders: process.env.NOTIFY_SOP_REMINDERS !== '0' && process.env.NOTIFY_SOP_REMINDERS !== 'false',
   activityLog: {

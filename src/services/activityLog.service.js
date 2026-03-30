@@ -8,6 +8,7 @@ import logger from '../config/logger.js';
 import ApiError from '../utils/ApiError.js';
 import { viewerSeesHiddenUsers, getDirectoryHiddenUserIds } from '../utils/platformAccess.util.js';
 import { resolveGeoForDisplay } from '../utils/ipGeo.util.js';
+import { getClientIpFromRequest, parseClientSuppliedIpHeader } from '../utils/requestIp.util.js';
 import { parseUserAgentDetails } from '../utils/parseUserAgent.util.js';
 
 const EXPORT_ROW_CAP = 50000;
@@ -114,32 +115,19 @@ const parseClientGeoHeader = (req) => {
  */
 const createActivityLog = async (actorId, action, entityType, entityId, metadata = {}, req = null) => {
   const headerGeo = geoFromTrustedHeaders(req);
-  const clientProvidedIp = req?.get?.('x-activity-client-ip') || req?.get?.('X-Activity-Client-Ip');
-  const ip = clientProvidedIp || req?.ip || req?.connection?.remoteAddress || null;
-
-  const clientCity = req?.get?.('x-activity-client-city') || req?.get?.('X-Activity-Client-City');
-  const clientRegion = req?.get?.('x-activity-client-region') || req?.get?.('X-Activity-Client-Region');
-  const clientCountry = req?.get?.('x-activity-client-country') || req?.get?.('X-Activity-Client-Country');
-
-  let geo = null;
-  if (clientCity || clientRegion || clientCountry) {
-    geo = {
-      city: clientCity || null,
-      region: clientRegion || null,
-      country: clientCountry || null,
-    };
-  } else {
-    const resolvedGeo = resolveGeoForDisplay(ip, headerGeo);
-    geo =
-      resolvedGeo &&
-      (resolvedGeo.country || resolvedGeo.region || resolvedGeo.city
-        ? {
-            country: resolvedGeo.country ?? null,
-            region: resolvedGeo.region ?? null,
-            city: resolvedGeo.city ?? null,
-          }
-        : null);
-  }
+  const ip = getClientIpFromRequest(req);
+  const clientIp = parseClientSuppliedIpHeader(req);
+  const preferredForGeo = clientIp || ip;
+  const resolvedGeo = resolveGeoForDisplay(preferredForGeo, headerGeo);
+  const geo =
+    resolvedGeo &&
+    (resolvedGeo.country || resolvedGeo.region || resolvedGeo.city
+      ? {
+          country: resolvedGeo.country ?? null,
+          region: resolvedGeo.region ?? null,
+          city: resolvedGeo.city ?? null,
+        }
+      : null);
 
   const clientGeo = req ? parseClientGeoHeader(req) : null;
 
@@ -150,6 +138,7 @@ const createActivityLog = async (actorId, action, entityType, entityId, metadata
     entityId,
     metadata: sanitizeMetadata(metadata),
     ip,
+    clientIp: clientIp || null,
     userAgent: req?.get?.('user-agent') || null,
     httpMethod: req?.method || null,
     httpPath: requestPathTemplate(req),
@@ -230,7 +219,13 @@ const buildActivityLogMongoFilter = async (filter, viewer = null) => {
   if (ip != null && String(ip).trim()) {
     const ipTrim = String(ip).trim();
     if (IP_FILTER_PATTERN.test(ipTrim)) {
-      mongoFilter.ip = new RegExp(`^${escapeRegExp(ipTrim)}`, 'i');
+      const re = new RegExp(`^${escapeRegExp(ipTrim)}`, 'i');
+      const ipOr = { $or: [{ ip: re }, { clientIp: re }] };
+      if (Array.isArray(mongoFilter.$and)) {
+        mongoFilter.$and.push(ipOr);
+      } else {
+        mongoFilter.$and = [ipOr];
+      }
     }
   }
 
@@ -240,6 +235,7 @@ const buildActivityLogMongoFilter = async (filter, viewer = null) => {
     const orClause = [{ action: re }, { entityType: re }, { entityId: re }];
     if (/^[\d.:a-fA-F]{3,}$/i.test(qTrim) && qTrim.length <= 45) {
       orClause.push({ ip: re });
+      orClause.push({ clientIp: re });
     }
     const qCond = { $or: orClause };
     if (Array.isArray(mongoFilter.$and)) {
@@ -286,7 +282,11 @@ const csvEscape = (cell) => {
  */
 const enrichPlainForClient = (plain) => {
   const withGeo = { ...plain };
-  withGeo.geo = resolveGeoForDisplay(withGeo.ip, withGeo.geo);
+  const serverIp = withGeo.ip ?? null;
+  const cip = withGeo.clientIp ?? null;
+  const preferred = cip || serverIp;
+  withGeo.geo = resolveGeoForDisplay(preferred, withGeo.geo);
+  withGeo.displayIp = cip || serverIp || null;
   return normalizeIdsForClient(withGeo);
 };
 
@@ -451,6 +451,8 @@ const streamActivityLogsCsv = async (filter, viewer, res) => {
     'location',
     'browserGeo',
     'ip',
+    'clientIp',
+    'displayIp',
     'browser',
     'os',
     'device',
@@ -491,6 +493,8 @@ const streamActivityLogsCsv = async (filter, viewer, res) => {
       location,
       browserGeo,
       plain.ip ?? '',
+      plain.clientIp ?? '',
+      plain.displayIp ?? '',
       uaParsed?.browser ?? '',
       uaParsed?.os ?? '',
       uaParsed?.device ?? '',

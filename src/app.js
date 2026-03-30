@@ -18,10 +18,13 @@ import * as bolnaController from './controllers/bolna.controller.js';
 
 const app = express();
 
-// Real client IP for req.ip (and activity logs, rate limits) when behind nginx/ALB/Cloudflare.
-// Set TRUST_PROXY_HOPS=1 for a single trusted hop; 0 in local dev when hitting Node directly.
+// Real client IP for req.ip (activity logs, rate limits) when behind nginx/ALB/Cloudflare.
+// Prefer TRUST_PROXY_HOPS=n (exact hop count). Or TRUST_PROXY=true for app.set('trust proxy', true).
+// 0 / unset: direct Node — req.ip is the TCP peer (often 127.0.0.1 via local reverse proxy).
 if (config.trustProxyHops > 0) {
   app.set('trust proxy', config.trustProxyHops);
+} else if (config.trustProxy) {
+  app.set('trust proxy', true);
 }
 
 if (config.env !== 'test') {
@@ -90,10 +93,8 @@ const corsOptions = {
     'Authorization',
     'X-Requested-With',
     'X-Activity-Client-Geo',
-    'X-Activity-Client-Ip',
-    'X-Activity-Client-City',
-    'X-Activity-Client-Region',
-    'X-Activity-Client-Country',
+    'x-client-ip',
+    'X-Client-Ip',
   ],
   exposedHeaders: ['Authorization'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],

@@ -36,6 +36,11 @@ const activityLogSchema = mongoose.Schema(
       type: String,
       default: null,
     },
+    /** Optional browser-reported public IP (x-client-ip); prefer for geo/display when set. Server `ip` remains the TCP/proxy peer. */
+    clientIp: {
+      type: String,
+      default: null,
+    },
     userAgent: {
       type: String,
       default: null,

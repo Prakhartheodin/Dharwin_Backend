@@ -7,6 +7,7 @@ import {getUserByEmail} from './user.service.js';
 import ApiError from '../utils/ApiError.js';
 import { tokenTypes } from '../config/tokens.js';
 import Token from '../models/token.model.js';
+import { getClientIpFromRequest, parseClientSuppliedIpHeader } from '../utils/requestIp.util.js';
 
 
 /**
@@ -36,7 +37,7 @@ const generateToken = (userId, expires, type, secret = config.jwt.secret, extraP
  * @param {Moment} expires
  * @param {string} type
  * @param {boolean} [blacklisted]
- * @param {{ userAgent?: string, ip?: string }} [options]
+ * @param {{ userAgent?: string, ip?: string, clientIp?: string|null }} [options]
  * @returns {Promise<Token>}
  */
 const saveToken = async (token, userId, expires, type, blacklisted = false, options = {}) => {
@@ -48,6 +49,7 @@ const saveToken = async (token, userId, expires, type, blacklisted = false, opti
     blacklisted,
     userAgent: options.userAgent ?? null,
     ip: options.ip ?? null,
+    clientIp: options.clientIp ?? null,
   });
   return tokenDoc;
 };
@@ -68,15 +70,16 @@ const verifyToken = async (token, type) => {
 };
 
 /**
- * Get request metadata for session (userAgent, ip)
+ * Get request metadata for session (userAgent, server ip, optional x-client-ip)
  * @param {import('express').Request} [req]
- * @returns {{ userAgent: string|null, ip: string|null }}
+ * @returns {{ userAgent: string|null, ip: string|null, clientIp: string|null }}
  */
 const getRequestSessionMeta = (req) => {
-  if (!req) return { userAgent: null, ip: null };
+  if (!req) return { userAgent: null, ip: null, clientIp: null };
   const userAgent = typeof req.get === 'function' ? req.get('User-Agent') || null : null;
-  const ip = req.ip || req.socket?.remoteAddress || (req.connection && req.connection.remoteAddress) || null;
-  return { userAgent, ip };
+  const ip = getClientIpFromRequest(req);
+  const clientIp = parseClientSuppliedIpHeader(req);
+  return { userAgent, ip, clientIp };
 };
 
 /**
@@ -86,13 +89,13 @@ const getRequestSessionMeta = (req) => {
  * @returns {Promise<Object>}
  */
 const generateAuthTokens = async (user, req = null) => {
-  const { userAgent, ip } = getRequestSessionMeta(req);
+  const { userAgent, ip, clientIp } = getRequestSessionMeta(req);
   const accessTokenExpires = moment().add(config.jwt.accessExpirationMinutes, 'minutes');
   const accessToken = generateToken(user.id, accessTokenExpires, tokenTypes.ACCESS);
 
   const refreshTokenExpires = moment().add(config.jwt.refreshExpirationDays, 'days');
   const refreshToken = generateToken(user.id, refreshTokenExpires, tokenTypes.REFRESH);
-  await saveToken(refreshToken, user.id, refreshTokenExpires, tokenTypes.REFRESH, false, { userAgent, ip });
+  await saveToken(refreshToken, user.id, refreshTokenExpires, tokenTypes.REFRESH, false, { userAgent, ip, clientIp });
 
   return {
     access: {
@@ -146,7 +149,7 @@ const generateVerifyEmailToken = async (user) => {
  * @returns {Promise<Object>}
  */
 const generateImpersonationTokens = async (impersonatedUser, impersonationId, adminUserId, startedAt, req = null) => {
-  const { userAgent, ip } = getRequestSessionMeta(req);
+  const { userAgent, ip, clientIp } = getRequestSessionMeta(req);
   const impersonationPayload = {
     impersonation: {
       by: adminUserId,
@@ -171,7 +174,11 @@ const generateImpersonationTokens = async (impersonatedUser, impersonationId, ad
     config.jwt.secret,
     impersonationPayload
   );
-  await saveToken(refreshToken, impersonatedUser.id, refreshTokenExpires, tokenTypes.REFRESH, false, { userAgent, ip });
+  await saveToken(refreshToken, impersonatedUser.id, refreshTokenExpires, tokenTypes.REFRESH, false, {
+    userAgent,
+    ip,
+    clientIp,
+  });
 
   return {
     access: {

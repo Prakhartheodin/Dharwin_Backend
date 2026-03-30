@@ -24,11 +24,13 @@ Important actions by administrators and significant user actions are recorded fo
 ### Deployment: correct client IP (location + rate limits)
 
 - Set **`TRUST_PROXY_HOPS`** in `.env` when the API sits behind a **trusted** reverse proxy, load balancer, or Cloudflare (typically **`1`** for one hop). Configured in [`src/app.js`](../src/app.js) as Express **`trust proxy`**. If unset/`0`, `req.ip` is the direct TCP peer (often `127.0.0.1` in dev or the LB internal IP in prod), so activity **IP**/**Location** and **per-IP rate limits** can be wrong.
-- Your edge must **set or overwrite** `X-Forwarded-For` (do not trust client-forged values from the open internet). See [Express behind proxies](https://expressjs.com/en/guide/behind-proxies.html).
+- Optional **`TRUST_PROXY=true`** (when hops are `0`): enables `app.set('trust proxy', true)`. Prefer an explicit hop count when you know it.
+- Your edge must **set or overwrite** `X-Forwarded-For` (do not trust client-forged values from the open internet). Example nginx: `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`. See [Express behind proxies](https://expressjs.com/en/guide/behind-proxies.html).
+- **Audit `ip` is never taken from browser headers** (e.g. ipify-injected values). Each log row stores the **TCP/proxy-derived client** for that HTTP request only, so list/export APIs return the stored field as-is (aside from normal `geo` display enrichment from that stored IP).
 
 ### Optional: browser GPS (signed-in users)
 
-- Any **authenticated** client may send header **`X-Activity-Client-Geo`** on API requests: `lat,lng,accuracyM,epochMs` (comma-separated). The timestamp must be within **30 minutes**; values are validated server-side. When valid, the log stores **`clientGeo`** (`lat`, `lng`, `accuracyM`, `capturedAt`, `source: browser_geolocation`) **in addition to** server-derived **`ip`** and IP-based **`geo`**. The frontend prompts for geolocation after sign-in (once per browser tab session).
+- Clients may send header **`X-Activity-Client-Geo`** on API requests: `lat,lng,accuracyM,epochMs` (comma-separated). The timestamp must be within **30 minutes**; values are validated server-side. When valid, the log stores **`clientGeo`** (`lat`, `lng`, `accuracyM`, `capturedAt`, `source: browser_geolocation`) **in addition to** server-derived **`ip`** and IP-based **`geo`**. The frontend captures geolocation **before** `POST /auth/login` (so sign-in rows include browser coordinates when allowed) and refreshes coordinates after sign-in when needed.
 - CORS must allow **`X-Activity-Client-Geo`** on the frontend origin (see [`src/app.js`](../src/app.js) `allowedHeaders`).
 - **GET /v1/activity-logs/network-preview** — same auth as list (`requireActivityLogsListAccess`); returns **`{ "ip": "<server-seen address>" }`** (optional; for custom tooling).
 
@@ -84,7 +86,7 @@ Important actions by administrators and significant user actions are recorded fo
 
 Older documents may have **`httpMethod`**, **`httpPath`**, **`geo`**, or **`clientGeo`** omitted (null/empty).
 
-**List response `clientGeo` (optional):** When present, shape is `{ "lat", "lng", "accuracyM", "capturedAt", "source": "browser_geolocation" }`. Written when the actor was **authenticated** and the creating request included a valid **`X-Activity-Client-Geo`** header (e.g. after the user allowed browser location).
+**List response `clientGeo` (optional):** When present, shape is `{ "lat", "lng", "accuracyM", "capturedAt", "source": "browser_geolocation" }`. Written when the creating request included a valid **`X-Activity-Client-Geo`** header (including **sign-in**, if the client sent coordinates on `POST /auth/login`).
 
 **List response `geo` (enriched):** For each row, if stored `geo` has no country/region/city, the API fills display location from the stored **`ip`**: **local/private** addresses (e.g. `127.0.0.1`, RFC1918) map to a **`city` label** (`Local / private network`); **public IPv4** uses the bundled **GeoLite-derived** database from `geoip-lite` (approximate; update the package / data periodically). Rows that already have `geo` from Cloudflare are unchanged.
 
@@ -121,7 +123,7 @@ Older documents may have **`httpMethod`**, **`httpPath`**, **`geo`**, or **`clie
 
 - Do not put secrets or unnecessary PII in `metadata`; the service strips known sensitive key substrings.
 - **Geo** from **`CF-IPCountry`** is only trustworthy when the header is set by your **CDN / edge**, not by the browser.
-- **`X-Activity-Client-Geo`** is **user-supplied** GPS; it is **only persisted** for **authenticated** requests and is **validated** (ranges, freshness). It supplements, not replaces, server **`ip`** / **`geo`**.
+- **`X-Activity-Client-Geo`** is **user-supplied** GPS; it is **validated** (ranges, freshness) and persisted when valid. It supplements, not replaces, server **`ip`** / **`geo`**. Do not send client-reported public IP headers for audit — they are **ignored** server-side.
 - Apply normal **rate limiting** for admin list endpoints in production.
 
 ---
