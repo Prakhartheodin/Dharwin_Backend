@@ -14,6 +14,19 @@ import {
 import * as activityLogService from '../services/activityLog.service.js';
 import { ActivityActions, EntityTypes } from '../config/activityLog.js';
 
+/** Owner row, or email match (public-apply candidates use job creator as owner). */
+const findApplicantCandidate = async (user) => {
+  const userId = user._id || user.id;
+  let candidate = await Candidate.findOne({ owner: userId });
+  if (!candidate) {
+    const emailNorm = String(user.email || '').toLowerCase().trim();
+    if (emailNorm) {
+      candidate = await Candidate.findOne({ email: emailNorm });
+    }
+  }
+  return candidate;
+};
+
 const get = catchAsync(async (req, res) => {
   const application = await getJobApplicationById(req.params.applicationId);
   if (!application) {
@@ -48,7 +61,7 @@ const list = catchAsync(async (req, res) => {
 });
 
 const getMyApplications = catchAsync(async (req, res) => {
-  const candidate = await Candidate.findOne({ owner: req.user._id });
+  const candidate = await findApplicantCandidate(req.user);
   if (!candidate) {
     throw new ApiError(httpStatus.NOT_FOUND, 'No candidate profile found');
   }
@@ -71,7 +84,7 @@ const getMyApplications = catchAsync(async (req, res) => {
 const WITHDRAWABLE_STATUSES = ['Applied', 'Screening'];
 
 const withdrawApplication = catchAsync(async (req, res) => {
-  const candidate = await Candidate.findOne({ owner: req.user._id });
+  const candidate = await findApplicantCandidate(req.user);
   if (!candidate) {
     throw new ApiError(httpStatus.NOT_FOUND, 'No candidate profile found');
   }

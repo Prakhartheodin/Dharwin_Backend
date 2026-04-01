@@ -3,6 +3,8 @@ import pick from '../utils/pick.js';
 import catchAsync from '../utils/catchAsync.js';
 import ApiError from '../utils/ApiError.js';
 import Student from '../models/student.model.js';
+import TrainingModule from '../models/trainingModule.model.js';
+import Project from '../models/project.model.js';
 import { 
   createCandidate, 
   queryCandidates, 
@@ -213,11 +215,25 @@ const get = catchAsync(async (req, res) => {
   const ownerId = obj.owner?.id ?? obj.owner;
   const ownerIdStr = ownerId ? String(ownerId) : null;
   let studentId = null;
+  let assignedTrainingPrograms = [];
+  let assignedProjects = [];
   if (ownerId) {
     const st = await Student.findOne({ user: ownerId }).select('_id').lean();
     studentId = st?._id?.toString() ?? null;
+    if (st?._id) {
+      const mods = await TrainingModule.find({ students: st._id })
+        .select('moduleName')
+        .sort({ moduleName: 1 })
+        .lean();
+      assignedTrainingPrograms = mods.map((m) => ({ id: String(m._id), name: m.moduleName }));
+    }
+    const projs = await Project.find({ assignedTo: ownerId })
+      .select('name status')
+      .sort({ name: 1 })
+      .lean();
+    assignedProjects = projs.map((p) => ({ id: String(p._id), name: p.name, status: p.status }));
   }
-  res.send({ ...obj, studentId, ownerId: ownerIdStr });
+  res.send({ ...obj, studentId, ownerId: ownerIdStr, assignedTrainingPrograms, assignedProjects });
 });
 
 const update = catchAsync(async (req, res) => {

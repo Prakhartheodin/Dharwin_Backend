@@ -2,7 +2,7 @@
  * Bolna AI voice calling agent client.
  */
 
-import { normalizePhone, validatePhone } from '../utils/phone.js';
+import { normalizePhone, validatePhone, validatePhonePlausible } from '../utils/phone.js';
 import logger from '../config/logger.js';
 import config from '../config/config.js';
 
@@ -61,6 +61,14 @@ async function initiateCall(params) {
     return {
       success: false,
       error: 'Invalid phone number format. Use E.164 (e.g. +918755887760) or 10-digit number.',
+    };
+  }
+  if (!validatePhonePlausible(recipientPhone)) {
+    return {
+      success: false,
+      error:
+        'Phone number is not a valid callable line (e.g. US/Canada needs a real area code and exchange, not all zeros). ' +
+        'Replace placeholder numbers like +10000000000 with a real mobile number.',
     };
   }
 

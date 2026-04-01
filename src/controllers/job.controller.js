@@ -274,7 +274,12 @@ const browseApply = catchAsync(async (req, res) => {
   const { jobId } = req.params;
   const userId = req.user.id || req.user._id;
 
+  const emailNorm = (req.user.email || '').toLowerCase().trim();
+  // Public apply stores candidate.owner as job creator, so logged-in applicants may have no row by owner — match by email too.
   let candidate = await Candidate.findOne({ owner: userId });
+  if (!candidate && emailNorm) {
+    candidate = await Candidate.findOne({ email: emailNorm });
+  }
   if (!candidate) {
     // Find admin user via roleIds
     const Role = (await import('../models/role.model.js')).default;
@@ -289,7 +294,7 @@ const browseApply = catchAsync(async (req, res) => {
       owner: userId,
       adminId: adminUser._id,
       fullName: req.user.name || req.user.email,
-      email: req.user.email,
+      email: emailNorm || req.user.email,
       phoneNumber: '0000000000',
       isProfileCompleted: 10,
     });
@@ -321,15 +326,16 @@ const browseJobById = catchAsync(async (req, res) => {
 
 // Public job controllers (no auth required)
 const listPublicJobs = catchAsync(async (req, res) => {
-  const filter = pick(req.query, ['title', 'location', 'jobType', 'experienceLevel']);
-  // Only show Active jobs publicly
+  const filter = pick(req.query, ['title', 'location', 'jobType', 'experienceLevel', 'search', 'jobOrigin']);
+  // Only show Active jobs publicly; same candidate-facing set as /jobs/browse
   filter.status = 'Active';
-  
-  const options = pick(req.query, ['limit', 'page']);
+  filter.forCandidates = true;
+
+  const options = pick(req.query, ['limit', 'page', 'sortBy']);
   const result = await queryJobs(filter, options);
-  
+
   // Strip internal fields from public response
-  const publicJobs = result.results.map(job => ({
+  const publicJobs = result.results.map((job) => ({
     id: job._id || job.id,
     title: job.title,
     organisation: job.organisation,
@@ -340,6 +346,9 @@ const listPublicJobs = catchAsync(async (req, res) => {
     salaryRange: job.salaryRange,
     experienceLevel: job.experienceLevel,
     createdAt: job.createdAt,
+    status: job.status,
+    jobOrigin: job.jobOrigin,
+    externalPlatformUrl: job.externalPlatformUrl,
   }));
   
   res.send({
@@ -362,7 +371,7 @@ const getPublicJob = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Job not found');
   }
   
-  // Strip internal fields
+  // Strip internal fields (keep flags needed for public UI: internal vs external, apply rules)
   const publicJob = {
     id: job._id || job.id,
     title: job.title,
@@ -374,8 +383,11 @@ const getPublicJob = catchAsync(async (req, res) => {
     salaryRange: job.salaryRange,
     experienceLevel: job.experienceLevel,
     createdAt: job.createdAt,
+    status: job.status,
+    jobOrigin: job.jobOrigin,
+    externalPlatformUrl: job.externalPlatformUrl,
   };
-  
+
   res.send(publicJob);
 });
 

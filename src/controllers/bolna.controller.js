@@ -10,7 +10,7 @@ import { getJobById } from '../services/job.service.js';
 import Job from '../models/job.model.js';
 import config from '../config/config.js';
 import logger from '../config/logger.js';
-import { normalizePhone } from '../utils/phone.js';
+import { normalizePhone, validatePhonePlausible } from '../utils/phone.js';
 
 const initiateCall = catchAsync(async (req, res) => {
   const body = req.body;
@@ -117,6 +117,13 @@ const initiateCandidateCall = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid phone number format');
   }
 
+  if (!validatePhonePlausible(formattedPhone)) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'Phone number is not a valid callable line. Use a real mobile number (US/Canada: valid area code and exchange, not placeholders like +10000000000).'
+    );
+  }
+
   const candidateAgentId = config.bolna.candidateAgentId;
 
   console.log('📞 Initiating candidate verification call:', {
@@ -138,7 +145,13 @@ const initiateCandidateCall = catchAsync(async (req, res) => {
   });
 
   if (!result.success) {
-    throw new ApiError(httpStatus.BAD_GATEWAY, result.error || 'Failed to initiate call');
+    const msg = result.error || 'Failed to initiate call';
+    const isClientPhone =
+      typeof msg === 'string' &&
+      (msg.toLowerCase().includes('not valid') ||
+        msg.toLowerCase().includes('invalid') ||
+        msg.toLowerCase().includes('callable line'));
+    throw new ApiError(isClientPhone ? httpStatus.BAD_REQUEST : httpStatus.BAD_GATEWAY, msg);
   }
 
   // Create call record via webhook-style payload

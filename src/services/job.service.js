@@ -616,7 +616,13 @@ const applyCandidateToJob = async (jobId, candidateId, appliedById, currentUser)
   if (!candidate) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Candidate not found');
   }
-  const isSelfApply = String(candidate.owner) === String(currentUser.id || currentUser._id);
+  const userId = String(currentUser.id || currentUser._id);
+  const userEmail = String(currentUser.email || '').toLowerCase().trim();
+  const candidateEmail = String(candidate.email || '').toLowerCase().trim();
+  // Public apply stores candidate.owner as job creator; same user still matches by email.
+  const isSelfApply =
+    String(candidate.owner) === userId ||
+    (Boolean(userEmail) && userEmail === candidateEmail);
   if (!canAccessJob && !isSelfApply) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
@@ -675,9 +681,10 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
   }
 
   const { fullName, email, password, phoneNumber, countryCode, coverLetter } = applicationData;
+  const emailNormalized = String(email || '').toLowerCase().trim();
 
   // Check if user with this email already exists
-  const existingUser = await User.findOne({ email: email.toLowerCase() });
+  const existingUser = await User.findOne({ email: emailNormalized });
   if (existingUser) {
     throw new ApiError(
       httpStatus.CONFLICT,
@@ -695,7 +702,7 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
   // Create new user with Student role (active status for auto-login)
   const user = await User.create({
     name: fullName,
-    email: email.toLowerCase(),
+    email: emailNormalized,
     password,
     phoneNumber,
     countryCode,
@@ -729,15 +736,15 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
   // For public applications, assign to the job creator (admin) so they're visible in candidates list
   const jobCreatorId = job.createdBy || job.owner;
   
-  // Check if candidate with this email already exists
-  let candidate = await Candidate.findOne({ email: email.toLowerCase() });
-  
+  // Check if candidate with this email already exists (unique index on email)
+  let candidate = await Candidate.findOne({ email: emailNormalized });
+
   if (!candidate) {
     const candidateData = {
       owner: jobCreatorId || user._id, // Assign to job creator/owner, fallback to self
       adminId: jobCreatorId || user._id, // Use same for adminId
       fullName,
-      email: email.toLowerCase(),
+      email: emailNormalized,
       phoneNumber,
       countryCode,
       // Default empty arrays for required fields
@@ -755,8 +762,20 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
       candidateData.documents = [...(candidateData.documents || []), ...documentUrls];
     }
 
-    candidate = await Candidate.create(candidateData);
-    console.log('✅ New candidate created:', { _id: candidate._id, fullName: candidate.fullName, email: candidate.email });
+    try {
+      candidate = await Candidate.create(candidateData);
+      console.log('✅ New candidate created:', { _id: candidate._id, fullName: candidate.fullName, email: candidate.email });
+    } catch (createErr) {
+      if (createErr.code === 11000) {
+        candidate = await Candidate.findOne({ email: emailNormalized });
+      }
+      if (!candidate) throw createErr;
+      console.log('✅ Existing candidate reused after duplicate-key race:', {
+        _id: candidate._id,
+        fullName: candidate.fullName,
+        email: candidate.email,
+      });
+    }
   } else {
     console.log('✅ Existing candidate found:', { _id: candidate._id, fullName: candidate.fullName, email: candidate.email });
     

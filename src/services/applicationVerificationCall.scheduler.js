@@ -9,6 +9,7 @@
 import JobApplication from '../models/jobApplication.model.js';
 import logger from '../config/logger.js';
 import bolnaService from './bolna.service.js';
+import { validatePhonePlausible } from '../utils/phone.js';
 import callRecordService from './callRecord.service.js';
 import { initiateCandidateVerificationCall } from './bolnaCandidateVerification.service.js';
 
@@ -86,6 +87,14 @@ async function runApplicationVerificationCalls() {
                                countryCode === 'GB' ? '+44' : 
                                countryCode === 'AU' ? '+61' : '+1';
           phone = `${countryPrefix}${phone}`;
+        }
+
+        if (!validatePhonePlausible(phone)) {
+          logger.warn(
+            `Skipping application ${application._id}: phone is not a valid callable number (${phone}). ` +
+              'Fix candidate phone or Bolna will reject the call.'
+          );
+          continue;
         }
         
         logger.info(`Initiating verification call for application ${application._id} to ${phone}`);

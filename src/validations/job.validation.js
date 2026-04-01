@@ -265,6 +265,7 @@ const browseJob = {
 const listPublicJobs = {
   query: Joi.object().keys({
     title: Joi.string().optional().trim(),
+    search: Joi.string().optional().trim(),
     location: Joi.string().optional().trim(),
     jobType: Joi.string()
       .valid('Full-time', 'Part-time', 'Contract', 'Temporary', 'Internship', 'Freelance')
@@ -272,6 +273,8 @@ const listPublicJobs = {
     experienceLevel: Joi.string()
       .valid('Entry Level', 'Mid Level', 'Senior Level', 'Executive')
       .optional(),
+    jobOrigin: Joi.string().valid('internal', 'external').optional(),
+    sortBy: Joi.string().optional().trim(),
     limit: Joi.number().integer().min(1).max(100).default(10),
     page: Joi.number().integer().min(1).default(1),
   }),
