@@ -69,6 +69,11 @@ export async function replyMessage(accountId, userId, messageId, payload) {
   return outlookProvider.replyMessage(account, messageId, payload);
 }
 
+export async function replyAllMessage(accountId, userId, messageId, payload) {
+  const account = await getOutlookAccountForUser(accountId, userId);
+  return outlookProvider.replyAllMessage(account, messageId, payload);
+}
+
 export async function forwardMessage(accountId, userId, messageId, payload) {
   const account = await getOutlookAccountForUser(accountId, userId);
   const orig = await outlookProvider.getMessage(account, messageId);
@@ -79,6 +84,7 @@ export async function forwardMessage(accountId, userId, messageId, payload) {
     `Date: ${orig.date}`,
     `Subject: ${orig.subject}`,
     `To: ${orig.to}`,
+    ...(orig.cc ? [`Cc: ${orig.cc}`] : []),
     '',
     orig.htmlBody || orig.textBody || '',
     '',

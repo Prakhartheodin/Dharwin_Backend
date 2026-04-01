@@ -94,8 +94,17 @@ async function initiateCall(params) {
         : null;
   if (durationCap != null && Number.isFinite(durationCap) && durationCap > 0) {
     payload.max_call_duration_seconds = Math.round(durationCap);
-    logger.debug(`Bolna POST /call max_call_duration_seconds=${payload.max_call_duration_seconds}`);
+  } else if (durationCap === 0) {
+    logger.warn(
+      'Bolna POST /call: max_call_duration_seconds omitted (BOLNA_MAX_CALL_DURATION_SECONDS=0). ' +
+        'Call length is controlled only by Bolna → Agent → Call tab → Total Call Timeout (defaults are often ~2–5 minutes).'
+    );
   }
+
+  logger.info(
+    `Bolna POST /call agent_id=${payload.agent_id} recipient_e164_tail=${recipientPhone.slice(-4)} ` +
+      `max_call_duration_seconds=${payload.max_call_duration_seconds ?? 'omitted — set Total Call Timeout in Bolna → Agent → Call tab if calls drop around 1–2 min'}`
+  );
 
   const callerIdRaw = getCallerId(params);
   if (callerIdRaw) {

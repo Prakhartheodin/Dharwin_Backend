@@ -192,6 +192,8 @@ export async function listThreads(account, { labelId, pageToken, pageSize = 20, 
       return {
         id: t.id,
         threadId: t.id,
+        lastMessageId: last?.id,
+        firstMessageId: first?.id,
         snippet: stripTags(t.snippet || ''),
         from: lastH.from || firstH.from || '',
         to: lastH.to || firstH.to || '',
@@ -539,6 +541,59 @@ export async function sendMessage(account, { to, cc, bcc, subject, html, attachm
   return { id: res.data.id, threadId: res.data.threadId };
 }
 
+function extractEmailAddr(raw) {
+  const s = String(raw || '').trim();
+  const m = s.match(/<([^>]+)>/);
+  return (m ? m[1] : s).trim().toLowerCase();
+}
+
+function splitAddressHeader(header) {
+  if (!header || !String(header).trim()) return [];
+  const parts = [];
+  let cur = '';
+  let depth = 0;
+  for (const ch of String(header)) {
+    if (ch === '<') depth += 1;
+    else if (ch === '>') depth -= 1;
+    if (ch === ',' && depth === 0) {
+      if (cur.trim()) parts.push(cur.trim());
+      cur = '';
+    } else cur += ch;
+  }
+  if (cur.trim()) parts.push(cur.trim());
+  return parts;
+}
+
+/** Build To / Cc lines for Reply All (exclude mailbox owner). */
+function buildReplyAllToCc(orig, selfEmail) {
+  const self = extractEmailAddr(selfEmail);
+  const fromParts = splitAddressHeader(orig.from);
+  const toParts = splitAddressHeader(orig.to);
+  const ccParts = splitAddressHeader(orig.cc || '');
+  const toSet = new Set();
+  const toOut = [];
+  const addTo = (raw) => {
+    const e = extractEmailAddr(raw);
+    if (!e || e === self) return;
+    if (toSet.has(e)) return;
+    toSet.add(e);
+    toOut.push(raw.trim());
+  };
+  for (const p of fromParts) addTo(p);
+  for (const p of toParts) addTo(p);
+  const ccOut = [];
+  const ccSeen = new Set();
+  for (const p of ccParts) {
+    const e = extractEmailAddr(p);
+    if (!e || e === self) continue;
+    if (toSet.has(e)) continue;
+    if (ccSeen.has(e)) continue;
+    ccSeen.add(e);
+    ccOut.push(p.trim());
+  }
+  return { to: toOut.join(', '), cc: ccOut.join(', ') };
+}
+
 /**
  * Reply to a message.
  */
@@ -575,6 +630,92 @@ export async function replyMessage(account, messageId, { html, attachments = [] 
   const lines = [
     `From: ${account.email}`,
     `To: ${to}`,
+    `Subject: ${subject}`,
+    `In-Reply-To: ${inReplyTo}`,
+    `References: ${references}`,
+    'MIME-Version: 1.0',
+  ];
+
+  if (!hasAttachments) {
+    lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+    lines.push('');
+    lines.push(altPart);
+  } else {
+    lines.push(`Content-Type: multipart/mixed; boundary="${mixBoundary}"`);
+    lines.push('');
+    lines.push(`--${mixBoundary}`);
+    lines.push(`Content-Type: multipart/alternative; boundary="${altBoundary}"`);
+    lines.push('');
+    lines.push(altPart);
+    for (const att of attachments) {
+      lines.push(`--${mixBoundary}`);
+      lines.push(`Content-Type: ${att.mimeType || 'application/octet-stream'}; name="${att.filename || 'attachment'}"`);
+      lines.push('Content-Transfer-Encoding: base64');
+      lines.push(`Content-Disposition: attachment; filename="${att.filename || 'attachment'}"`);
+      lines.push('');
+      const attB64 = typeof att.content === 'string' ? att.content : Buffer.from(att.content).toString('base64');
+      lines.push(wrapBase64(attB64));
+    }
+    lines.push(`--${mixBoundary}--`);
+  }
+
+  const raw = Buffer.from(lines.join('\r\n'), 'utf8').toString('base64url');
+
+  await ensureValidToken(account);
+  const oauth2Client = createOAuth2Client();
+  oauth2Client.setCredentials({ access_token: account.accessToken });
+  const gmail = getGmailClient(oauth2Client);
+
+  const res = await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw,
+      threadId: orig.threadId,
+    },
+  });
+  return { id: res.data.id, threadId: res.data.threadId };
+}
+
+/**
+ * Reply all — same thread as original; To/Cc from message headers minus self.
+ */
+export async function replyAllMessage(account, messageId, { html, attachments = [] } = {}) {
+  const orig = await getMessage(account, messageId);
+  const { to, cc } = buildReplyAllToCc(orig, account.email);
+  if (!to) {
+    return replyMessage(account, messageId, { html, attachments });
+  }
+  const inReplyTo = orig.messageId || '';
+  const references = orig.references ? `${orig.references} ${orig.messageId}`.trim() : (orig.messageId || '');
+  const subject = (orig.subject || '').startsWith('Re:') ? orig.subject : `Re: ${orig.subject || ''}`;
+
+  const rawHtml = unescapeHtml(html || '<p></p>');
+  const plainText = htmlToPlainText(rawHtml) || ' ';
+  const htmlB64 = wrapBase64(Buffer.from(rawHtml, 'utf8').toString('base64'));
+  const plainB64 = wrapBase64(Buffer.from(plainText, 'utf8').toString('base64'));
+
+  const altBoundary = `----=_Alt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const hasAttachments = attachments && attachments.length > 0;
+  const mixBoundary = `----=_Part_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+
+  const altPart = [
+    `--${altBoundary}`,
+    'Content-Type: text/plain; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    plainB64,
+    `--${altBoundary}`,
+    'Content-Type: text/html; charset=UTF-8',
+    'Content-Transfer-Encoding: base64',
+    '',
+    htmlB64,
+    `--${altBoundary}--`,
+  ].join('\r\n');
+
+  const lines = [
+    `From: ${account.email}`,
+    `To: ${to}`,
+    ...(cc ? [`Cc: ${cc}`] : []),
     `Subject: ${subject}`,
     `In-Reply-To: ${inReplyTo}`,
     `References: ${references}`,

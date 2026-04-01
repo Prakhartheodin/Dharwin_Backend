@@ -2,14 +2,6 @@ import BolnaCandidateAgentSettings from '../models/bolnaCandidateAgentSettings.m
 
 const DEFAULT_KEY = 'default';
 
-function sanitizePlainText(value, maxLen) {
-  if (value == null) return '';
-  let s = String(value);
-  s = s.replace(/\0/g, '');
-  if (s.length > maxLen) s = s.slice(0, maxLen);
-  return s;
-}
-
 export async function getBolnaCandidateAgentSettingsDoc() {
   return BolnaCandidateAgentSettings.findOneAndUpdate(
     { key: DEFAULT_KEY },
@@ -18,35 +10,31 @@ export async function getBolnaCandidateAgentSettingsDoc() {
   );
 }
 
-/** Plain object for API responses */
+/** Plain object for API responses (portal overrides removed; fields stay empty for compatibility). */
 export async function getBolnaCandidateAgentSettings() {
   const doc = await getBolnaCandidateAgentSettingsDoc();
   return {
-    extraSystemInstructions: doc.extraSystemInstructions || '',
-    greetingOverride: doc.greetingOverride || '',
+    extraSystemInstructions: '',
+    greetingOverride: '',
     updatedAt: doc.updatedAt,
     updatedBy: doc.updatedBy,
   };
 }
 
-/** Strips dangerous bytes and enforces max lengths before save */
-export async function updateBolnaCandidateAgentSettings(body, userId) {
-  const extraSystemInstructions = sanitizePlainText(body.extraSystemInstructions, 8000);
-  const greetingOverride = sanitizePlainText(body.greetingOverride, 500);
-
+/** Clears legacy stored overrides; body keys are ignored. */
+export async function updateBolnaCandidateAgentSettings(_body, userId) {
   const doc = await getBolnaCandidateAgentSettingsDoc();
-  doc.extraSystemInstructions = extraSystemInstructions;
-  doc.greetingOverride = greetingOverride;
+  doc.extraSystemInstructions = '';
+  doc.greetingOverride = '';
   if (userId) doc.updatedBy = userId;
   await doc.save();
   return getBolnaCandidateAgentSettings();
 }
 
-/** For prompt composition (no extra query if caller passes loaded doc — optional later) */
+/** Portal greeting / extra-instruction overrides removed — only KB seed text is appended in bolnaCandidateVerification. */
 export async function getBolnaCandidateAgentSettingsForPrompt() {
-  const doc = await getBolnaCandidateAgentSettingsDoc();
   return {
-    extraSystemInstructions: doc.extraSystemInstructions || '',
-    greetingOverride: doc.greetingOverride || '',
+    extraSystemInstructions: '',
+    greetingOverride: '',
   };
 }

@@ -120,6 +120,37 @@ const envVarsSchema = Joi.object()
       .optional()
       .allow('')
       .description('Comma-separated operator emails for activity logs + support camera'),
+
+    // Voice agent knowledge base (RAG)
+    KB_EMBEDDING_MODEL: Joi.string().optional().default('text-embedding-3-small'),
+    KB_EMBEDDING_DIMENSIONS: Joi.number().integer().min(256).max(3072).optional().allow(null, ''),
+    KB_CHUNK_TARGET_TOKENS: Joi.number().integer().min(128).max(8192).optional().default(768),
+    KB_CHUNK_OVERLAP_TOKENS: Joi.number().integer().min(0).max(2048).optional().default(128),
+    KB_TOP_K: Joi.number().integer().min(1).max(50).optional().default(8),
+    KB_MIN_SIMILARITY: Joi.number().min(0).max(1).optional().default(0.28),
+    KB_MAX_PDF_MB: Joi.number().integer().min(1).max(100).optional().default(25),
+    KB_MAX_URL_BYTES: Joi.number().integer().min(1024).max(52428800).optional().default(2097152),
+    KB_MAX_DOCS_PER_AGENT: Joi.number().integer().min(1).max(500).optional().default(50),
+    KB_QUERY_CACHE_TTL_SECONDS: Joi.number().integer().min(0).max(86400).optional().default(3600),
+    KB_QUERY_CACHE_MISS_TTL_SECONDS: Joi.number().integer().min(0).max(600).optional().default(120),
+    MONGODB_VECTOR_SEARCH_ENABLED: Joi.string().valid('true', 'false', '1', '0', '').optional().allow(null).empty(''),
+
+    /** Mirror PDF/URL ingests to Bolna hosted Knowledge Base (POST /knowledgebase). Requires BOLNA_API_KEY. */
+    KB_BOLNA_SYNC_ENABLED: Joi.string().valid('true', 'false', '1', '0', '').optional().allow(null).empty(''),
+    KB_BOLNA_KB_MULTILINGUAL: Joi.string().valid('true', 'false', '1', '0', '').optional().allow(null).empty(''),
+    KB_BOLNA_KB_CHUNK_SIZE: Joi.number().integer().min(64).max(4096).optional(),
+    KB_BOLNA_KB_OVERLAPPING: Joi.number().integer().min(0).max(2048).optional(),
+    KB_BOLNA_KB_SIMILARITY_TOP_K: Joi.number().integer().min(1).max(50).optional(),
+
+    /** HRM WebRTC (SignalR) — JWT must match hrm-webrtc/backend Jwt:Key, Issuer, Audience; role claim admin. */
+    HRM_WEBRTC_JWT_SECRET: Joi.string().optional().allow('').description('Same value as HRM backend Jwt:Key'),
+    HRM_WEBRTC_JWT_ISSUER: Joi.string().optional().allow('').description('Same as HRM Jwt:Issuer'),
+    HRM_WEBRTC_JWT_AUDIENCE: Joi.string().optional().allow('').description('Same as HRM Jwt:Audience'),
+    HRM_WEBRTC_SIGNALING_BASE_URL: Joi.string()
+      .optional()
+      .allow('')
+      .description('HRM backend base URL (no trailing slash), e.g. https://hrm-api.example.com'),
+    HRM_WEBRTC_TOKEN_EXPIRATION_MINUTES: Joi.number().integer().min(1).max(120).optional().default(15),
   })
   .unknown();
 
@@ -284,6 +315,39 @@ const config = {
   },
   designatedSuperadminEmails,
   isDesignatedSuperadminEmail,
+  voiceAgentKb: {
+    embeddingModel: envVars.KB_EMBEDDING_MODEL || 'text-embedding-3-small',
+    embeddingDimensions:
+      envVars.KB_EMBEDDING_DIMENSIONS != null && envVars.KB_EMBEDDING_DIMENSIONS !== ''
+        ? Number(envVars.KB_EMBEDDING_DIMENSIONS)
+        : null,
+    chunkTargetTokens: envVars.KB_CHUNK_TARGET_TOKENS ?? 768,
+    chunkOverlapTokens: envVars.KB_CHUNK_OVERLAP_TOKENS ?? 128,
+    topK: envVars.KB_TOP_K ?? 8,
+    minSimilarity: envVars.KB_MIN_SIMILARITY ?? 0.28,
+    maxPdfMb: envVars.KB_MAX_PDF_MB ?? 25,
+    maxUrlBytes: envVars.KB_MAX_URL_BYTES ?? 2097152,
+    maxDocsPerAgent: envVars.KB_MAX_DOCS_PER_AGENT ?? 50,
+    queryCacheTtlSeconds: envVars.KB_QUERY_CACHE_TTL_SECONDS ?? 3600,
+    queryCacheMissTtlSeconds: envVars.KB_QUERY_CACHE_MISS_TTL_SECONDS ?? 120,
+    mongodbVectorSearchEnabled: ['true', '1'].includes(
+      String(envVars.MONGODB_VECTOR_SEARCH_ENABLED || '')
+        .trim()
+        .toLowerCase()
+    ),
+    bolnaSyncEnabled: ['true', '1'].includes(String(envVars.KB_BOLNA_SYNC_ENABLED || '').trim().toLowerCase()),
+    bolnaKbMultilingual: ['true', '1'].includes(String(envVars.KB_BOLNA_KB_MULTILINGUAL || '').trim().toLowerCase()),
+    bolnaKbChunkSize: envVars.KB_BOLNA_KB_CHUNK_SIZE ?? null,
+    bolnaKbOverlapping: envVars.KB_BOLNA_KB_OVERLAPPING ?? null,
+    bolnaKbSimilarityTopK: envVars.KB_BOLNA_KB_SIMILARITY_TOP_K ?? null,
+  },
+  hrmWebRtc: {
+    jwtSecret: (envVars.HRM_WEBRTC_JWT_SECRET || '').trim(),
+    jwtIssuer: (envVars.HRM_WEBRTC_JWT_ISSUER || '').trim(),
+    jwtAudience: (envVars.HRM_WEBRTC_JWT_AUDIENCE || '').trim(),
+    signalingBaseUrl: (envVars.HRM_WEBRTC_SIGNALING_BASE_URL || '').trim().replace(/\/+$/, ''),
+    tokenExpirationMinutes: envVars.HRM_WEBRTC_TOKEN_EXPIRATION_MINUTES ?? 15,
+  },
 };
 
 // Production: warn if email/share links would use localhost

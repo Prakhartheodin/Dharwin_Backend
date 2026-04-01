@@ -10,6 +10,7 @@ export {
   getAttachment,
   sendMessage,
   replyMessage,
+  replyAllMessage,
   forwardMessage,
   modifyMessage,
   batchModifyMessages,

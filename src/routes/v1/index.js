@@ -44,6 +44,8 @@ import taskRoute from './task.route.js';
 import teamRoute from './team.route.js';
 import teamGroupRoute from './teamGroup.route.js';
 import bolnaRoute from './bolna.route.js';
+import voiceAgentRoute from './voiceAgent.route.js';
+import voiceKbRoute from './voiceKb.route.js';
 import webhookRoute from './webhook.route.js';
 import chatRoute from './chat.route.js';
 import communicationRoute from './communication.route.js';
@@ -52,6 +54,7 @@ import outlookRoute from './outlook.route.js';
 import supportTicketRoute from './supportTicket.route.js';
 import fileStorageRoute from './fileStorage.route.js';
 import supportCameraInviteRoute from './supportCameraInvite.route.js';
+import hrmWebRtcRoute from './hrmWebRtc.route.js';
 
 /**
  * RBAC inventory: Most mounted routers use requirePermissions (see each *.route.js).
@@ -227,6 +230,14 @@ const defaultRoutes = [
     route: bolnaRoute,
   },
   {
+    path: '/agents',
+    route: voiceAgentRoute,
+  },
+  {
+    path: '/kb',
+    route: voiceKbRoute,
+  },
+  {
     path: '/webhooks',
     route: webhookRoute,
   },
@@ -269,6 +280,10 @@ const defaultRoutes = [
   {
     path: '/platform/support-camera-invites',
     route: supportCameraInviteRoute,
+  },
+  {
+    path: '/platform/hrm-webrtc',
+    route: hrmWebRtcRoute,
   },
 ];
 

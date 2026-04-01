@@ -61,8 +61,7 @@ const patchBolnaCandidateAgentSettings = {
       extraSystemInstructions: Joi.string().allow('').max(8000),
       greetingOverride: Joi.string().allow('').max(500),
     })
-    .min(1)
-    .required(),
+    .default({}),
 };
 
 export {

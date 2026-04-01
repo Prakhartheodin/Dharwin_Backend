@@ -17,6 +17,7 @@ import {
 import { startMeetingScheduler, stopMeetingScheduler } from './services/meeting.scheduler.js';
 import applicationVerificationCallScheduler from './services/applicationVerificationCall.scheduler.js';
 import { logBolnaAgentConfigHealth } from './utils/bolnaAgentConfig.js';
+import { seedVoiceAgentsFromEnv } from './services/voiceAgent.service.js';
 
 let server;
 let candidateSchedulerId;
@@ -30,6 +31,7 @@ mongoose
   .then(() => {
     logger.info('Connected to MongoDB');
     logBolnaAgentConfigHealth();
+    seedVoiceAgentsFromEnv().catch((e) => logger.warn(`[VoiceAgent] seed skipped: ${e.message}`));
     const httpServer = http.createServer(app);
     if (config.env !== 'test') initSocket(httpServer);
     server = httpServer.listen(port, '0.0.0.0', () => {

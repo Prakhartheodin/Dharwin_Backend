@@ -43,6 +43,62 @@ const REVERSE_FOLDER_MAP = {
   outbox: 'OUTBOX',
 };
 
+/** OData single-quoted string literal escape */
+function odataEscapeString(value) {
+  return String(value || '').replace(/'/g, "''");
+}
+
+/** Graph message ids can include URL-reserved characters; encode every path segment. */
+function msgPath(messageId) {
+  return `/me/messages/${encodeURIComponent(messageId)}`;
+}
+
+/**
+ * List message ids in a conversation. Graph rejects filter+orderby on conversationId
+ * ("restriction or sort order is too complex"); omit $orderby and sort client-side.
+ * @see https://learn.microsoft.com/en-us/graph/api/user-list-messages
+ */
+async function listMessageIdsByConversationId(client, convEscaped) {
+  const res = await client
+    .api('/me/messages')
+    .filter(`conversationId eq '${convEscaped}'`)
+    .select('id,receivedDateTime')
+    .top(50)
+    .get();
+  const rows = [...(res.value || [])];
+  rows.sort((a, b) => {
+    const ta = new Date(a.receivedDateTime || 0).getTime();
+    const tb = new Date(b.receivedDateTime || 0).getTime();
+    return ta - tb;
+  });
+  return rows.map((m) => m.id).filter(Boolean);
+}
+
+/**
+ * Resolve message ids for a thread key from the UI: Graph conversationId, or a single message id
+ * when conversation filter returns nothing (missing/wrong conversationId in list).
+ */
+async function resolveMessageIdsForThread(client, threadKey) {
+  if (!threadKey) return [];
+  const escaped = odataEscapeString(threadKey);
+  try {
+    const ids = await listMessageIdsByConversationId(client, escaped);
+    if (ids.length > 0) return ids;
+  } catch (err) {
+    logger.warn('[Outlook] resolveMessageIds conversation filter failed: %s', err.message);
+  }
+  try {
+    // Do not $select conversationId on single-message GET — some mailboxes return
+    // "ConversationId isn't supported in the context of this operation."
+    const one = await client.api(msgPath(threadKey)).select('id').get();
+    if (!one?.id) return [];
+    return [one.id];
+  } catch (err) {
+    logger.warn('[Outlook] resolveMessageIds by message id failed for %s: %s', threadKey, err.message);
+    return [];
+  }
+}
+
 function createMsalApp() {
   const { clientId, clientSecret, tenantId } = config.microsoft;
   if (!clientId || !clientSecret) {
@@ -626,6 +682,9 @@ export async function listThreads(account, { labelId, pageToken, pageSize = 20, 
     threads.push({
       id: convId,
       threadId: convId,
+      /** Graph message ids — used when getThread returns no rows but list still shows snippet */
+      lastMessageId: latest.id,
+      firstMessageId: first.id,
       snippet: stripTags(latest.bodyPreview || '').slice(0, 200),
       from: latest.from?.emailAddress ? `${latest.from.emailAddress.name || ''} <${latest.from.emailAddress.address}>`.trim() : '',
       to: (latest.toRecipients || []).map((r) => `${r.emailAddress?.name || ''} <${r.emailAddress?.address}>`).join(', '),
@@ -650,35 +709,26 @@ export async function listThreads(account, { labelId, pageToken, pageSize = 20, 
 export async function getThread(account, threadId) {
   return with401Refresh(account, async () => {
     const client = createGraphClient(account.accessToken);
-    const escapedId = (threadId || '').replace(/'/g, "''");
-    /** Do not $select body on list queries: Graph often returns truncated body (~preview length) when $top is large, which made us skip per-message fetch and showed only a few lines in the UI. */
-    const res = await client
-      .api('/me/messages')
-      .filter(`conversationId eq '${escapedId}'`)
-      .orderby('receivedDateTime asc')
-      .select(
-        'id,conversationId,subject,bodyPreview,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,internetMessageId,hasAttachments,flag'
+    const ids = await resolveMessageIdsForThread(client, threadId);
+    const messages = (
+      await Promise.all(
+        ids.map(async (id) => {
+          try {
+            const full = await client
+              .api(msgPath(id))
+              .select(
+                'id,conversationId,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,internetMessageId,hasAttachments,flag'
+              )
+              .expand('attachments')
+              .get();
+            return formatOutlookMessage(full);
+          } catch (e) {
+            logger.warn('[Outlook] getThread message %s fetch failed: %s', id, e.message);
+            return null;
+          }
+        })
       )
-      .top(50)
-      .get();
-    const rows = res.value || [];
-    const messages = await Promise.all(
-      rows.map(async (row) => {
-        try {
-          const full = await client
-            .api(`/me/messages/${row.id}`)
-            .select(
-              'id,conversationId,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,internetMessageId,hasAttachments,flag'
-            )
-            .expand('attachments')
-            .get();
-          return formatOutlookMessage(full);
-        } catch (e) {
-          logger.warn('[Outlook] getThread message %s fetch failed: %s', row.id, e.message);
-          return formatOutlookMessage(row);
-        }
-      })
-    );
+    ).filter(Boolean);
     return { id: threadId, messages };
   });
 }
@@ -690,7 +740,7 @@ export async function getMessage(account, messageId) {
   return with401Refresh(account, async () => {
     const client = createGraphClient(account.accessToken);
     const msg = await client
-      .api(`/me/messages/${messageId}`)
+      .api(msgPath(messageId))
       .select('id,conversationId,subject,bodyPreview,body,from,toRecipients,ccRecipients,receivedDateTime,sentDateTime,isRead,internetMessageId,hasAttachments,flag')
       .get();
     return formatOutlookMessage(msg);
@@ -703,7 +753,7 @@ export async function getMessage(account, messageId) {
 export async function getAttachment(account, messageId, attachmentId) {
   return with401Refresh(account, async () => {
     const client = createGraphClient(account.accessToken);
-    const att = await client.api(`/me/messages/${messageId}/attachments/${attachmentId}`).get();
+    const att = await client.api(`${msgPath(messageId)}/attachments/${encodeURIComponent(attachmentId)}`).get();
     return att.contentBytes || '';
   });
 }
@@ -775,9 +825,9 @@ export async function replyMessage(account, messageId, { html, attachments = [] 
       },
       comment: '',
     };
-    await client.api(`/me/messages/${messageId}/reply`).post(replyBody);
+    await client.api(`${msgPath(messageId)}/reply`).post(replyBody);
   } else {
-    await client.api(`/me/messages/${messageId}/reply`).post({
+    await client.api(`${msgPath(messageId)}/reply`).post({
       message: {
         body: {
           contentType: 'HTML',
@@ -788,6 +838,40 @@ export async function replyMessage(account, messageId, { html, attachments = [] 
     });
   }
 
+  return { id: null, threadId: null };
+}
+
+/**
+ * Reply all — create draft via Graph, set HTML body, optional attachments, send.
+ */
+export async function replyAllMessage(account, messageId, { html, attachments = [] } = {}) {
+  await ensureValidToken(account);
+  const client = createGraphClient(account.accessToken);
+  const replyHtml = outlookSendHtmlBody(html || '');
+
+  const created = await client.api(`${msgPath(messageId)}/createReplyAll`).post({});
+  const draftId = created?.id;
+  if (!draftId) {
+    throw new Error('Outlook createReplyAll did not return a draft message id');
+  }
+
+  await client.api(msgPath(draftId)).patch({
+    body: {
+      contentType: 'HTML',
+      content: replyHtml,
+    },
+  });
+
+  for (const att of attachments) {
+    await client.api(`${msgPath(draftId)}/attachments`).post({
+      '@odata.type': '#microsoft.graph.fileAttachment',
+      name: att.filename || 'attachment',
+      contentType: att.mimeType || 'application/octet-stream',
+      contentBytes: typeof att.content === 'string' ? att.content : Buffer.from(att.content).toString('base64'),
+    });
+  }
+
+  await client.api(`${msgPath(draftId)}/send`).post({});
   return { id: null, threadId: null };
 }
 
@@ -808,13 +892,13 @@ export async function modifyMessage(account, messageId, { addLabelIds = [], remo
   if (removeLabelIds.includes('STARRED')) patch.flag = { flagStatus: 'notFlagged' };
 
   if (Object.keys(patch).length > 0) {
-    await client.api(`/me/messages/${messageId}`).patch(patch);
+    await client.api(msgPath(messageId)).patch(patch);
   }
 
   // Support SPAM → move to junkemail folder
   if (addLabelIds.includes('SPAM')) {
     try {
-      await client.api(`/me/messages/${messageId}/move`).post({ destinationId: 'junkemail' });
+      await client.api(`${msgPath(messageId)}/move`).post({ destinationId: 'junkemail' });
     } catch (err) {
       logger.warn('[Outlook] Failed to move message %s to junk: %s', messageId, err.message);
     }
@@ -823,7 +907,7 @@ export async function modifyMessage(account, messageId, { addLabelIds = [], remo
   // Support INBOX removal → move to archive
   if (removeLabelIds.includes('INBOX') && !addLabelIds.includes('SPAM')) {
     try {
-      await client.api(`/me/messages/${messageId}/move`).post({ destinationId: 'archive' });
+      await client.api(`${msgPath(messageId)}/move`).post({ destinationId: 'archive' });
     } catch (err) {
       logger.warn('[Outlook] Failed to archive message %s: %s', messageId, err.message);
     }
@@ -849,22 +933,13 @@ export async function batchModifyThreads(account, threadIds, { addLabelIds = [],
   const client = createGraphClient(account.accessToken);
 
   const allMessageIds = [];
-  for (const convId of threadIds) {
-    try {
-      const escapedId = (convId || '').replace(/'/g, "''");
-      const res = await client
-        .api('/me/messages')
-        .filter(`conversationId eq '${escapedId}'`)
-        .select('id')
-        .top(50)
-        .get();
-      for (const m of res.value || []) allMessageIds.push(m.id);
-    } catch {
-      // skip failed thread
-    }
+  for (const tid of threadIds) {
+    const ids = await resolveMessageIdsForThread(client, tid);
+    for (const id of ids) allMessageIds.push(id);
   }
-  if (allMessageIds.length === 0) return { success: true, modified: 0 };
-  return batchModifyMessages(account, allMessageIds, { addLabelIds, removeLabelIds });
+  const unique = [...new Set(allMessageIds)];
+  if (unique.length === 0) return { success: true, modified: 0 };
+  return batchModifyMessages(account, unique, { addLabelIds, removeLabelIds });
 }
 
 /**
@@ -873,7 +948,7 @@ export async function batchModifyThreads(account, threadIds, { addLabelIds = [],
 export async function deleteMessage(account, messageId) {
   await ensureValidToken(account);
   const client = createGraphClient(account.accessToken);
-  await client.api(`/me/messages/${messageId}/move`).post({ destinationId: 'deleteditems' });
+  await client.api(`${msgPath(messageId)}/move`).post({ destinationId: 'deleteditems' });
   return { success: true };
 }
 
@@ -885,20 +960,14 @@ export async function trashThreads(account, threadIds) {
   await ensureValidToken(account);
   const client = createGraphClient(account.accessToken);
 
-  for (const convId of threadIds) {
-    try {
-      const escapedId = (convId || '').replace(/'/g, "''");
-      const res = await client
-        .api('/me/messages')
-        .filter(`conversationId eq '${escapedId}'`)
-        .select('id')
-        .top(50)
-        .get();
-      for (const m of res.value || []) {
-        await client.api(`/me/messages/${m.id}/move`).post({ destinationId: 'deleteditems' });
+  for (const tid of threadIds) {
+    const ids = await resolveMessageIdsForThread(client, tid);
+    for (const id of ids) {
+      try {
+        await client.api(`${msgPath(id)}/move`).post({ destinationId: 'deleteditems' });
+      } catch (err) {
+        logger.warn('[Outlook] trashThreads move failed for %s: %s', id, err.message);
       }
-    } catch {
-      // skip
     }
   }
   return { success: true };

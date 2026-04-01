@@ -84,6 +84,12 @@ router.get(
   emailController.getAttachment
 );
 router.post('/messages/send', requirePermissions('emails.manage'), validate(emailValidation.sendMessage), emailController.sendMessage);
+router.post(
+  '/messages/:id/reply-all',
+  requirePermissions('emails.manage'),
+  validate(emailValidation.replyAllMessage),
+  emailController.replyAllMessage
+);
 router.post('/messages/:id/reply', requirePermissions('emails.manage'), validate(emailValidation.replyMessage), emailController.replyMessage);
 router.post('/messages/:id/forward', requirePermissions('emails.manage'), validate(emailValidation.forwardMessage), emailController.forwardMessage);
 router.patch('/messages/:id', requirePermissions('emails.manage'), validate(emailValidation.modifyMessage), emailController.modifyMessage);

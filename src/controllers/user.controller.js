@@ -64,6 +64,9 @@ const updateUser = catchAsync(async (req, res) => {
   if (!isAdmin && 'username' in updateBody) {
     delete updateBody.username;
   }
+  if (!isAdmin && 'hrmDeviceId' in updateBody) {
+    delete updateBody.hrmDeviceId;
+  }
   if (isAgent && !isAdmin && Array.isArray(updateBody.roleIds)) {
     const validation = await validateRoleIdsForAgent(updateBody.roleIds);
     if (!validation.allowed) {

@@ -103,6 +103,9 @@ const replyMessage = {
   }),
 };
 
+/** Same body/params as single reply */
+const replyAllMessage = replyMessage;
+
 const forwardMessage = {
   params: Joi.object().keys({
     id: Joi.string().required(),
@@ -288,6 +291,7 @@ export {
   getAttachment,
   sendMessage,
   replyMessage,
+  replyAllMessage,
   forwardMessage,
   modifyMessage,
   batchModifyMessages,

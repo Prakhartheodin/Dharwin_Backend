@@ -61,6 +61,12 @@ router.get(
   outlookController.getAttachment
 );
 router.post('/messages/send', requirePermissions('emails.manage'), validate(outlookValidation.sendMessage), outlookController.sendMessage);
+router.post(
+  '/messages/:id/reply-all',
+  requirePermissions('emails.manage'),
+  validate(outlookValidation.replyAllMessage),
+  outlookController.replyAllMessage
+);
 router.post('/messages/:id/reply', requirePermissions('emails.manage'), validate(outlookValidation.replyMessage), outlookController.replyMessage);
 router.post('/messages/:id/forward', requirePermissions('emails.manage'), validate(outlookValidation.forwardMessage), outlookController.forwardMessage);
 router.patch('/messages/:id', requirePermissions('emails.manage'), validate(outlookValidation.modifyMessage), outlookController.modifyMessage);

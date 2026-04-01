@@ -92,6 +92,12 @@ const userSchema = mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    /** Windows HRM agent device id (usually PC machine name). Links portal user ↔ SignalR RegisterDevice id. */
+    hrmDeviceId: {
+      type: String,
+      trim: true,
+      default: '',
+    },
   },
   {
     timestamps: true,

@@ -9,6 +9,7 @@ import {
   buildCandidateVerificationPromptContext,
   resolveCandidateAgentGreeting,
 } from './candidateVerificationPrompt.service.js';
+import { getKbPromptContextForExternalAgent } from './kbQuery.service.js';
 
 /**
  * Patch candidate agent system prompt (with DB overrides) then place call.
@@ -52,9 +53,18 @@ export async function initiateCandidateVerificationCall({
   });
 
   const openingGreeting = resolveCandidateAgentGreeting(promptContext, settings.greetingOverride);
+  let extra = settings.extraSystemInstructions || '';
+  try {
+    const kbCtx = await getKbPromptContextForExternalAgent(agentId);
+    if (kbCtx) {
+      extra = extra ? `${extra}\n\n${kbCtx}` : kbCtx;
+    }
+  } catch (e) {
+    logger.warn(`[KB] prompt context skipped: ${e.message}`);
+  }
   const systemPrompt = buildCandidateAgentPrompt(promptContext, {
     openingGreeting,
-    extraSystemInstructions: settings.extraSystemInstructions,
+    extraSystemInstructions: extra,
   });
 
   const promptHash = crypto.createHash('sha256').update(systemPrompt).digest('hex').slice(0, 12);

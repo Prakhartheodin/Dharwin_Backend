@@ -102,6 +102,15 @@ const replyMessage = catchAsync(async (req, res) => {
   res.status(httpStatus.CREATED).json(result);
 });
 
+const replyAllMessage = catchAsync(async (req, res) => {
+  const { accountId, html, attachments } = req.body;
+  const result = await outlookClientService.replyAllMessage(accountId, req.user.id, req.params.id, {
+    html,
+    attachments: attachments || [],
+  });
+  res.status(httpStatus.CREATED).json(result);
+});
+
 const forwardMessage = catchAsync(async (req, res) => {
   const { accountId, to, html, attachments } = req.body;
   const result = await outlookClientService.forwardMessage(accountId, req.user.id, req.params.id, {
@@ -178,6 +187,7 @@ export {
   getAttachment,
   sendMessage,
   replyMessage,
+  replyAllMessage,
   forwardMessage,
   modifyMessage,
   batchModifyMessages,

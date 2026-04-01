@@ -69,6 +69,7 @@ const updateUser = {
         mimeType: Joi.string().optional().trim(),
       }).optional().allow(null),
       notificationPreferences: notificationPreferencesSchema,
+      hrmDeviceId: Joi.string().trim().max(256).allow('', null),
     })
     .min(1),
 };
