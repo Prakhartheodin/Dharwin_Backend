@@ -9,7 +9,10 @@ async function runJobVerificationCalls() {
   try {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
     const jobs = await Job.find({
-      verificationCallExecutionId: { $in: [null, ''] },
+      $or: [
+        { verificationCallExecutionId: { $in: [null, ''] } },
+        { verificationCallExecutionId: { $exists: false } },
+      ],
       'organisation.phone': { $exists: true, $nin: [null, ''] },
       createdAt: { $gte: fiveMinutesAgo },
       jobOrigin: { $ne: 'external' },
@@ -62,7 +65,21 @@ async function syncCallRecordsFromBolna() {
       if (!executionId) continue;
       const result = await bolnaService.getExecutionDetails(executionId);
       if (!result.success || !result.details) continue;
-      const updated = await callRecordService.updateFromExecutionDetails(executionId, result.details);
+
+      const details = result.details;
+      if (details.status === 'unknown' && details.error_message?.includes('not found')) {
+        await callRecordService.updateCallRecordByExecutionId(executionId, {
+          status: 'expired',
+          errorMessage: details.error_message,
+        });
+        logger.debug(`Job call record ${executionId} marked expired (Bolna 404)`);
+        continue;
+      }
+
+      const updated = await callRecordService.updateFromExecutionDetails(executionId, details, {
+        setCompletedAt: true,
+        setErrorMessage: true,
+      });
       if (updated) {
         logger.info(`Synced call record ${executionId} with transcript/recording from Bolna`);
       }

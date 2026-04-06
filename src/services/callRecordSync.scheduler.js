@@ -58,6 +58,16 @@ async function runCallHistorySync() {
           continue;
         }
         const executionData = result.details;
+
+        // Bolna returned 404 → execution expired/gone. Mark terminal so we stop re-polling.
+        if (executionData.status === 'unknown' && executionData.error_message?.includes('not found')) {
+          await callRecordService.updateCallRecordByExecutionId(executionId, {
+            status: 'expired',
+            errorMessage: executionData.error_message,
+          });
+          syncedCount += 1;
+          continue;
+        }
         const data = executionData.data || executionData.execution || {};
         const norm = callRecordService.normalizePayload({
           ...executionData,
@@ -107,7 +117,7 @@ async function runCallHistorySync() {
         const recordsWithThisExecution = recordsToSync.filter((r) => r.executionId === executionId);
         for (const record of recordsWithThisExecution) {
           const statusChanged = status && status !== record.status;
-          const isTerminal = ['failed', 'error', 'completed'].includes(record.status);
+          const isTerminal = ['failed', 'error', 'completed', 'no_answer', 'busy', 'call_disconnected', 'expired'].includes(record.status);
           const hasNewData =
             (errorMessage && errorMessage !== record.errorMessage) ||
             (recordingUrl && recordingUrl !== record.recordingUrl) ||

@@ -14,7 +14,7 @@ const canManage = [auth(), requirePermissions('supportTickets.manage')];
 router
   .route('/')
   .post(
-    ...canManage,
+    ...canRead,
     uploadImagesVideos('attachments', 10),
     validate(supportTicketValidation.createSupportTicket),
     supportTicketController.create

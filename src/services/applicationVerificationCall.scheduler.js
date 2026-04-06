@@ -7,9 +7,10 @@
  */
 
 import JobApplication from '../models/jobApplication.model.js';
+import User from '../models/user.model.js';
 import logger from '../config/logger.js';
 import bolnaService from './bolna.service.js';
-import { validatePhonePlausible } from '../utils/phone.js';
+import { normalizePhone, validatePhonePlausible, isPlaceholderPhone } from '../utils/phone.js';
 import callRecordService from './callRecord.service.js';
 import { initiateCandidateVerificationCall } from './bolnaCandidateVerification.service.js';
 
@@ -24,13 +25,16 @@ async function findApplicationsNeedingCalls() {
     const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
     
     const applications = await JobApplication.find({
-      verificationCallExecutionId: { $in: [null, ''] },
+      $or: [
+        { verificationCallExecutionId: { $in: [null, ''] } },
+        { verificationCallExecutionId: { $exists: false } },
+      ],
       createdAt: { $gte: tenMinutesAgo },
     })
       .populate({
         path: 'candidate',
         select:
-          'fullName email phoneNumber countryCode qualifications experiences skills visaType customVisaType address shortBio salaryRange',
+          'fullName email phoneNumber countryCode owner qualifications experiences skills visaType customVisaType address shortBio salaryRange',
       })
       .populate({
         path: 'job',
@@ -40,13 +44,28 @@ async function findApplicationsNeedingCalls() {
       .limit(10)
       .lean();
     
-    // Filter to only those with valid phone numbers; skip applications to external mirrored jobs
-    return applications.filter((app) => {
-      if (app.job?.jobOrigin === 'external') return false;
-      const phone = app.candidate?.phoneNumber;
-      const countryCode = app.candidate?.countryCode;
-      return phone && countryCode;
-    });
+    const filtered = [];
+    for (const app of applications) {
+      if (app.job?.jobOrigin === 'external') continue;
+      let phone = app.candidate?.phoneNumber;
+      let cc = app.candidate?.countryCode;
+      // Candidate phone may be a placeholder from browseApply auto-create — fall back to User's phone.
+      if (!phone || isPlaceholderPhone(phone)) {
+        const ownerId = app.candidate?.owner?._id ?? app.candidate?.owner ?? app.appliedBy;
+        if (ownerId) {
+          const user = await User.findById(ownerId).select('phoneNumber countryCode').lean();
+          if (user?.phoneNumber && !isPlaceholderPhone(user.phoneNumber)) {
+            phone = user.phoneNumber;
+            cc = user.countryCode || cc;
+            app.candidate.phoneNumber = phone;
+            app.candidate.countryCode = cc;
+          }
+        }
+      }
+      if (!phone || isPlaceholderPhone(phone)) continue;
+      filtered.push(app);
+    }
+    return filtered;
   } catch (error) {
     logger.error(`Error finding applications needing calls: ${error.message}`);
     return [];
@@ -76,20 +95,16 @@ async function runApplicationVerificationCalls() {
           continue;
         }
         
-        // Format phone number (E.164 format)
-        const countryCode = candidate.countryCode || 'US';
-        let phone = candidate.phoneNumber?.replace(/\D/g, '') || '';
-        
-        // Add country code if not present
-        if (!phone.startsWith('+')) {
-          const countryPrefix = countryCode === 'IN' ? '+91' : 
-                               countryCode === 'US' ? '+1' : 
-                               countryCode === 'GB' ? '+44' : 
-                               countryCode === 'AU' ? '+61' : '+1';
-          phone = `${countryPrefix}${phone}`;
+        if (isPlaceholderPhone(candidate.phoneNumber)) {
+          logger.warn(
+            `Skipping application ${application._id}: candidate phone is a placeholder (${candidate.phoneNumber}).`
+          );
+          continue;
         }
 
-        if (!validatePhonePlausible(phone)) {
+        const phone = normalizePhone(candidate.phoneNumber, candidate.countryCode || '');
+
+        if (!phone || !validatePhonePlausible(phone)) {
           logger.warn(
             `Skipping application ${application._id}: phone is not a valid callable number (${phone}). ` +
               'Fix candidate phone or Bolna will reject the call.'
@@ -169,7 +184,7 @@ async function runApplicationVerificationCalls() {
 function mapNormalizedStatusToApplicationVerification(normStatus) {
   const s = String(normStatus || 'unknown').toLowerCase();
   if (s === 'completed') return 'completed';
-  if (s === 'failed' || s === 'error') return 'failed';
+  if (s === 'failed' || s === 'error' || s === 'expired') return 'failed';
   if (s === 'no_answer' || s === 'busy') return 'no_answer';
   if (s === 'in_progress' || s === 'initiated' || s === 'ringing' || s === 'queued') return 'pending';
   return 'pending';
@@ -187,6 +202,20 @@ async function syncApplicationCallRecords() {
       if (!result.success || !result.details) continue;
 
       const details = result.details;
+
+      // Execution expired in Bolna (404) — mark terminal so we stop polling.
+      if (details.status === 'unknown' && details.error_message?.includes('not found')) {
+        await callRecordService.updateFromExecutionDetails(executionId, details, {
+          setCompletedAt: true,
+          setErrorMessage: true,
+        });
+        await JobApplication.updateOne(
+          { verificationCallExecutionId: executionId },
+          { $set: { verificationCallStatus: 'failed' } }
+        );
+        continue;
+      }
+
       const data = details.data || details.execution || {};
       const hadBolnaStatus =
         details.status != null ||

@@ -19,6 +19,7 @@ export const NOTIFICATION_TYPE_TO_PREF_KEY = {
   certificate: 'certificates',
   course: 'courseUpdates',
   recruiter: 'recruiterUpdates',
+  support_ticket: 'supportTicketUpdates',
 };
 
 export const isNotificationEmailAllowedForPreferences = (notificationType, notificationPreferences) => {

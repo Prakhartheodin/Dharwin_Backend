@@ -51,6 +51,13 @@ export const ActivityActions = {
   JOB_APPLICATION_CREATE: 'jobApplication.create',
   JOB_APPLICATION_UPDATE: 'jobApplication.update',
   JOB_APPLICATION_DELETE: 'jobApplication.delete',
+  // Support Tickets
+  TICKET_CREATE: 'ticket.create',
+  TICKET_STATUS_CHANGE: 'ticket.statusChange',
+  TICKET_PRIORITY_CHANGE: 'ticket.priorityChange',
+  TICKET_ASSIGN: 'ticket.assign',
+  TICKET_COMMENT: 'ticket.comment',
+  TICKET_DELETE: 'ticket.delete',
   // Integration / admin settings (sensitive config surfaces)
   SETTINGS_BOLNA_CANDIDATE_AGENT_UPDATE: 'settings.bolnaCandidateAgent.update',
 };
@@ -70,4 +77,5 @@ export const EntityTypes = {
   JOB: 'Job',
   JOB_APPLICATION: 'JobApplication',
   BOLNA_CANDIDATE_AGENT_SETTINGS: 'BolnaCandidateAgentSettings',
+  SUPPORT_TICKET: 'SupportTicket',
 };

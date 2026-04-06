@@ -607,7 +607,8 @@ function inferSectionsFromPlaylist(playlist, expectedCount) {
  * using document name + module name.
  */
 async function buildPlaylistFromDocument(extractedModules, extractedContent, videoItems, opts = {}) {
-  const { documentName, generateBlog, generateQuiz, generateEssay, searchVideosForModule, sendSSE, res } = opts;
+  const { documentName, generateBlog, generateQuiz, generateEssay, searchVideosForModule, sendSSE, res, contentTypes } = opts;
+  const selectedTypes = Array.isArray(contentTypes) && contentTypes.length ? contentTypes : null;
   const mergedPlaylist = [];
   let vIdx = 0;
 
@@ -625,12 +626,14 @@ async function buildPlaylistFromDocument(extractedModules, extractedContent, vid
         : ['video', 'quiz', 'essay', 'blog'];
 
       for (const contentType of sectionOrder) {
+        if (selectedTypes && !selectedTypes.includes(contentType)) continue;
         if (contentType === 'video') {
           const count = mod.videoCount || 1;
           let added = 0;
           while (added < count) {
             if (vIdx < videoItems.length) {
               const v = videoItems[vIdx++];
+              if (!v.youtubeUrl) continue;
               pushWithOrder({
                 contentType: 'youtube-link',
                 title: v.title,
@@ -645,6 +648,7 @@ async function buildPlaylistFromDocument(extractedModules, extractedContent, vid
               const extra = await searchVideosForModule(documentName, secTitle);
               for (let i = 0; i < Math.min(extra.length, count - added); i++) {
                 const v = extra[i];
+                if (!v.youtubeUrl) continue;
                 pushWithOrder({
                   contentType: 'youtube-link',
                   title: v.title,
@@ -754,6 +758,7 @@ async function buildPlaylistFromDocument(extractedModules, extractedContent, vid
     }
     while (vIdx < videoItems.length) {
       const v = videoItems[vIdx++];
+      if (!v.youtubeUrl) continue;
       pushWithOrder({
         contentType: 'youtube-link',
         title: v.title,
@@ -764,9 +769,10 @@ async function buildPlaylistFromDocument(extractedModules, extractedContent, vid
   } else {
     const fallbackModuleName = 'Module';
     for (const contentType of DOCUMENT_SECTION_ORDER) {
+      if (selectedTypes && !selectedTypes.includes(contentType)) continue;
       if (contentType === 'video') {
         if (videoItems.length > 0) {
-          videoItems.forEach((v) => {
+          videoItems.filter((v) => v.youtubeUrl).forEach((v) => {
             pushWithOrder({
               contentType: 'youtube-link',
               title: v.title,
@@ -777,7 +783,7 @@ async function buildPlaylistFromDocument(extractedModules, extractedContent, vid
         } else if (searchVideosForModule && documentName) {
           if (sendSSE && res) sendSSE(res, 'creating_course', 'started', 'Searching videos...');
           const extra = await searchVideosForModule(documentName, fallbackModuleName);
-          extra.forEach((v) => {
+          extra.filter((v) => v.youtubeUrl).forEach((v) => {
             pushWithOrder({
               contentType: 'youtube-link',
               title: v.title,
@@ -952,12 +958,12 @@ export const generateWithAI = async (req, res) => {
       );
     }
 
+    const includeVideos = Array.isArray(contentTypes) ? contentTypes.includes('video') : true;
     let videos = [];
     if (allVideoIds.length) {
       sendSSE(res, 'fetching_videos', 'started', 'Fetching video details...');
       videos = await getVideoDetails(allVideoIds);
       sendSSE(res, 'fetching_videos', 'completed', `Done — got details for ${videos.length} videos`);
-      // When API fails or YOUTUBE_API_KEY not set, create placeholders from extracted IDs so videos still appear in playlist
       if (videos.length === 0 && allVideoIds.length) {
         videos = allVideoIds.map((id, i) => ({
           youtubeUrl: `https://www.youtube.com/watch?v=${id}`,
@@ -967,20 +973,21 @@ export const generateWithAI = async (req, res) => {
         }));
         logger.info('[Module AI] Using placeholder video items (YouTube API unavailable or returned empty)', { count: videos.length });
       }
-    } else {
+    } else if (includeVideos) {
       sendSSE(res, 'searching_youtube', 'started', 'Searching YouTube for videos...');
       videos = await searchVideos(topic, 3, videoLanguage);
       sendSSE(res, 'searching_youtube', 'completed', `Done — found ${videos.length} relevant videos`);
     }
 
-    // YouTube links from create-with-AI go into playlist as youtube-link (same as quiz → quiz, essay → essay).
-    const videoItems = videos.map((v, i) => ({
-      contentType: 'youtube-link',
-      title: v.title,
-      duration: v.duration,
-      youtubeUrl: v.youtubeUrl,
-      order: i,
-    }));
+    const videoItems = videos
+      .filter((v) => v.youtubeUrl)
+      .map((v, i) => ({
+        contentType: 'youtube-link',
+        title: v.title,
+        duration: v.duration,
+        youtubeUrl: v.youtubeUrl,
+        order: i,
+      }));
 
     const documentHasContent =
       pdfText?.trim() &&
@@ -998,6 +1005,7 @@ export const generateWithAI = async (req, res) => {
       if (suggested.shortDescription) shortDescriptionFromAI = suggested.shortDescription;
       mergedPlaylist = await buildPlaylistFromDocument(extractedModules, extractedContent, videoItems, {
         documentName: documentTitle || topic,
+        contentTypes,
         generateBlog: async (docName, moduleName) => {
           const { title, blogContent } = await generateBlogForModule({ documentName: docName, moduleName });
           return { title, blogContent };
@@ -1116,7 +1124,7 @@ export const generateWithAI = async (req, res) => {
           if (es?.length) item = { ...item, essay: { questions: es }, essayData: { questions: es } };
         }
         mergedPlaylist.push(item);
-        if (item.contentType === 'blog' && vIdx < videoItems.length) {
+        if (includeVideos && item.contentType === 'blog' && vIdx < videoItems.length) {
           const videoItem = videoItems[vIdx++];
           mergedPlaylist.push({
             ...videoItem,
@@ -1125,8 +1133,10 @@ export const generateWithAI = async (req, res) => {
           });
         }
       }
-      while (vIdx < videoItems.length) {
-        mergedPlaylist.push(videoItems[vIdx++]);
+      if (includeVideos) {
+        while (vIdx < videoItems.length) {
+          mergedPlaylist.push(videoItems[vIdx++]);
+        }
       }
 
       if (extractedContent.quizzes?.length > 0 && !mergedPlaylist.some((p) => p.contentType === 'quiz')) {
@@ -1268,12 +1278,13 @@ export const suggestTopicDescription = async (req, res) => {
 /** Get playlist outline (preview) from course title. POST body: { moduleTitle, numModules, level, contentTypes } */
 export const getPlaylistOutline = async (req, res) => {
   try {
-    const { moduleTitle, numModules, level, contentTypes } = req.body || {};
+    const { moduleTitle, numModules, level, contentTypes, numBlogs, numVideos, numQuizzes, numEssays } = req.body || {};
     const result = await getPlaylistOutlineFromTitle(
       moduleTitle || '',
       numModules,
       level,
-      contentTypes
+      contentTypes,
+      { numBlogs, numVideos, numQuizzes, numEssays }
     );
     res.json(result);
   } catch (err) {
@@ -1319,12 +1330,12 @@ export const generateModuleFromTitle = async (req, res) => {
       shortDescription: (shortDescription || '').trim(),
       level: ['beginner', 'intermediate', 'advanced'].includes(level) ? level : 'intermediate',
       sections: Array.isArray(sections) ? sections : [],
-      numBlogs: Math.max(0, Number(numBlogs) || 2),
-      numVideos: Math.max(0, Number(numVideos) || 2),
-      numQuizzes: Math.max(0, Number(numQuizzes) || 1),
-      questionsPerQuiz: Math.min(10, Math.max(2, Number(questionsPerQuiz) || 4)),
-      numEssays: Math.max(0, Number(numEssays) || 1),
-      questionsPerEssay: Math.min(8, Math.max(1, Number(questionsPerEssay) || 3)),
+      numBlogs: Math.max(0, Number(numBlogs ?? 2)),
+      numVideos: Math.max(0, Number(numVideos ?? 2)),
+      numQuizzes: Math.max(0, Number(numQuizzes ?? 1)),
+      questionsPerQuiz: Math.min(10, Math.max(2, Number(questionsPerQuiz ?? 4))),
+      numEssays: Math.max(0, Number(numEssays ?? 1)),
+      questionsPerEssay: Math.min(8, Math.max(1, Number(questionsPerEssay ?? 3))),
       videoLanguage,
       onProgress: (msg) => send('generating', 'started', msg),
     });
@@ -1385,6 +1396,7 @@ export const saveModuleWithVideoAssignments = async (req, res) => {
         mergedPlaylist.push({ ...normalizeContentType(item), order: order++ });
         if (ct === 'blog' && videosBySection[sIdx]?.length) {
           for (const v of videosBySection[sIdx]) {
+            if (!v?.youtubeUrl) continue;
             mergedPlaylist.push({
               contentType: 'youtube-link',
               title: v.title,
@@ -1484,9 +1496,9 @@ export const cloneModule = async (req, res) => {
     const cloneData = {
       moduleName: `${original.moduleName} (Copy)`,
       shortDescription: original.shortDescription,
-      categories: original.categories?.map((c) => c._id || c.id) || [],
-      students: original.students?.map((s) => s._id || s.id) || [],
-      mentorsAssigned: original.mentorsAssigned?.map((m) => m._id || m.id) || [],
+      categories: original.categories?.map((c) => String(c._id || c.id)) || [],
+      students: [],
+      mentorsAssigned: [],
       playlist: original.playlist.map((item) => {
         const p = item.toObject ? item.toObject() : { ...item };
         delete p._id;
@@ -1498,7 +1510,7 @@ export const cloneModule = async (req, res) => {
     if (original.coverImage?.key) {
       cloneData.coverImage = { ...(original.coverImage.toObject ? original.coverImage.toObject() : original.coverImage) };
     }
-    const cloned = await TrainingModule.create(cloneData);
+    const cloned = await createTrainingModule(cloneData, req.user);
     res.status(201).json(cloned);
   } catch (err) {
     logger.error('Clone failed', err);

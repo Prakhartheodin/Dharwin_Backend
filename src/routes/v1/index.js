@@ -52,6 +52,7 @@ import communicationRoute from './communication.route.js';
 import emailRoute from './email.route.js';
 import outlookRoute from './outlook.route.js';
 import supportTicketRoute from './supportTicket.route.js';
+import cannedResponseRoute from './cannedResponse.route.js';
 import fileStorageRoute from './fileStorage.route.js';
 import supportCameraInviteRoute from './supportCameraInvite.route.js';
 import hrmWebRtcRoute from './hrmWebRtc.route.js';
@@ -272,6 +273,10 @@ const defaultRoutes = [
   {
     path: '/support-tickets',
     route: supportTicketRoute,
+  },
+  {
+    path: '/canned-responses',
+    route: cannedResponseRoute,
   },
   {
     path: '/file-storage',

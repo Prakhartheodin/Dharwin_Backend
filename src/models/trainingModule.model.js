@@ -153,7 +153,6 @@ const trainingModuleSchema = mongoose.Schema(
         difficulty: {
           type: String,
           enum: ['easy', 'medium', 'hard'],
-          default: 'medium',
         },
       },
     ],

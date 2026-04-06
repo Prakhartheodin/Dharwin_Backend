@@ -394,11 +394,10 @@ const exportAll = catchAsync(async (req, res) => {
 // Helper function to generate CSV format
 const generateCSVFormat = (exportData) => {
   const headers = [
-    'ID',
+    'Employee ID',
     'Full Name',
     'Email',
     'Phone Number',
-    'Profile Picture',
     'Short Bio',
     'SEVIS ID',
     'EAD',
@@ -433,11 +432,10 @@ const generateCSVFormat = (exportData) => {
   ];
 
   const rows = exportData.data.map(candidate => [
-    candidate.id,
+    candidate.employeeId || '',
     `"${candidate.fullName || ''}"`,
     candidate.email || '',
-    candidate.phoneNumber || '',
-    candidate.profilePicture?.url || '',
+    `="${candidate.phoneNumber || ''}"`,
     `"${(candidate.shortBio || '').replace(/"/g, '""')}"`,
     candidate.sevisId || '',
     candidate.ead || '',
@@ -446,7 +444,7 @@ const generateCSVFormat = (exportData) => {
     candidate.countryCode || '',
     `"${candidate.degree || ''}"`,
     `"${candidate.supervisorName || ''}"`,
-    candidate.supervisorContact || '',
+    `="${candidate.supervisorContact || ''}"`,
     candidate.supervisorCountryCode || '',
     candidate.salaryRange || '',
     candidate.address?.streetAddress || '',

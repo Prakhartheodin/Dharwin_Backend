@@ -10,7 +10,7 @@ import { getJobById } from '../services/job.service.js';
 import Job from '../models/job.model.js';
 import config from '../config/config.js';
 import logger from '../config/logger.js';
-import { normalizePhone, validatePhonePlausible } from '../utils/phone.js';
+import { normalizePhone, validatePhonePlausible, isPlaceholderPhone } from '../utils/phone.js';
 
 const initiateCall = catchAsync(async (req, res) => {
   const body = req.body;
@@ -101,38 +101,36 @@ const initiateCandidateCall = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Job not found');
   }
 
-  // Format phone number to E.164
-  let formattedPhone = String(phoneNumber || candidate.phoneNumber).replace(/\D/g, '');
-  const cc = countryCode || candidate.countryCode || 'US';
-
-  if (!formattedPhone.startsWith('91') && !formattedPhone.startsWith('1') &&
-      !formattedPhone.startsWith('44') && !formattedPhone.startsWith('61')) {
-    const countryPrefix = cc === 'IN' ? '91' : cc === 'US' ? '1' : cc === 'GB' ? '44' : cc === 'AU' ? '61' : '1';
-    formattedPhone = countryPrefix + formattedPhone;
+  const rawPhone = phoneNumber || candidate.phoneNumber;
+  if (isPlaceholderPhone(rawPhone)) {
+    throw new ApiError(
+      httpStatus.BAD_REQUEST,
+      'Candidate does not have a real phone number on file. Update the candidate profile with a valid mobile number before initiating a call.'
+    );
   }
-  formattedPhone = '+' + formattedPhone;
 
-  const digitsOnly = formattedPhone.replace(/\D/g, '');
-  if (digitsOnly.length < 10 || digitsOnly.length > 15) {
+  const cc = countryCode || candidate.countryCode || '';
+  const formattedPhone = normalizePhone(String(rawPhone), cc);
+
+  if (!formattedPhone) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid phone number format');
   }
-
   if (!validatePhonePlausible(formattedPhone)) {
     throw new ApiError(
       httpStatus.BAD_REQUEST,
-      'Phone number is not a valid callable line. Use a real mobile number (US/Canada: valid area code and exchange, not placeholders like +10000000000).'
+      `Phone number ${formattedPhone} is not a valid callable line. Please update the candidate profile with a real mobile number.`
     );
   }
 
   const candidateAgentId = config.bolna.candidateAgentId;
 
-  console.log('📞 Initiating candidate verification call:', {
+  logger.info('Initiating candidate verification call: ' + JSON.stringify({
     candidateId,
     candidateName: candidate.fullName,
     phone: formattedPhone,
     jobId,
     jobTitle: jobTitle || job.title,
-  });
+  }));
 
   const result = await initiateCandidateVerificationCall({
     agentId: candidateAgentId,
@@ -178,7 +176,7 @@ const initiateCandidateCall = catchAsync(async (req, res) => {
     }
   );
 
-  console.log('✅ Candidate verification call initiated:', result.executionId);
+  logger.info(`Candidate verification call initiated: ${result.executionId}`);
 
   res.status(httpStatus.OK).send({
     success: true,
@@ -269,14 +267,14 @@ async function sendPostCallEmailAndNotification(record, application) {
   const candidate = await Candidate.findById(application.candidate);
   const job = await Job.findById(application.job);
   if (!candidate || !job) {
-    console.warn('📧 Post-call email skipped: candidate or job not found');
+    logger.warn('Post-call email skipped: candidate or job not found');
     return;
   }
 
   const CallRecord = (await import('../models/callRecord.model.js')).default;
   const recordId = record._id;
   if (!recordId) {
-    console.warn('📧 Post-call email skipped: call record has no _id');
+    logger.warn('Post-call email skipped: call record has no _id');
     return;
   }
   const claim = await CallRecord.updateOne(
@@ -305,7 +303,7 @@ async function sendPostCallEmailAndNotification(record, application) {
       otherJobsCount,
       portalUrl,
     });
-    console.log(`📧 Post-call thank-you email sent to ${candidate.email}`);
+    logger.info(`Post-call thank-you email sent to ${candidate.email}`);
 
     const user = await User.findOne({ email: candidate.email.toLowerCase() });
     if (user) {
@@ -316,11 +314,11 @@ async function sendPostCallEmailAndNotification(record, application) {
         message: `We appreciate you taking the time to speak with us about the ${job.title} position at ${job.organisation?.name || 'our company'}. Our team will review your responses and get back to you soon.`,
         link: '/ats/jobs/',
       });
-      console.log(`🔔 Post-call notification sent to ${candidate.fullName}`);
+      logger.info(`Post-call notification sent to ${candidate.fullName}`);
     }
   } catch (err) {
     await CallRecord.updateOne({ _id: recordId }, { $set: { postCallFollowUpSent: false } });
-    console.error('Failed to send post-call email/notification:', err);
+    logger.error(`Failed to send post-call email/notification: ${err.message}`);
   }
 }
 
@@ -342,7 +340,7 @@ const receiveWebhook = catchAsync(async (req, res) => {
       .lean();
     if (application) {
       sendPostCallEmailAndNotification(record, application).catch((err) =>
-        console.error('Post-call email fallback error:', err)
+        logger.error(`Post-call email fallback error: ${err.message}`)
       );
     }
   }
@@ -374,10 +372,10 @@ const receiveCandidateWebhook = catchAsync(async (req, res) => {
       .lean();
     if (application) {
       sendPostCallEmailAndNotification(record, application).catch((err) =>
-        console.error('Post-call email error:', err)
+        logger.error(`Post-call email error: ${err.message}`)
       );
     } else {
-      console.warn(`📞 Candidate webhook: no JobApplication found for executionId=${record.executionId}`);
+      logger.warn(`Candidate webhook: no JobApplication found for executionId=${record.executionId}`);
     }
   }
 

@@ -25,6 +25,7 @@ const notificationSchema = mongoose.Schema(
         'recruiter',
         'assignment',
         'sop',
+        'support_ticket',
         'general',
       ],
       default: 'general',

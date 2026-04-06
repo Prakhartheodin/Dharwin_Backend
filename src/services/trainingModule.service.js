@@ -5,6 +5,7 @@ import Student from '../models/student.model.js';
 import Mentor from '../models/mentor.model.js';
 import { uploadFileToS3 } from './upload.service.js';
 import { generatePresignedDownloadUrl } from '../config/s3.js';
+import logger from '../config/logger.js';
 
 const normalizeQuizQuestions = (questions = []) =>
   questions.map((q) => ({
@@ -214,7 +215,7 @@ const queryTrainingModules = async (filter, options) => {
           const url = await generatePresignedDownloadUrl(module.coverImage.key, 7 * 24 * 3600);
           module.coverImage.url = url;
         } catch (error) {
-          console.error('Failed to regenerate cover image URL:', error);
+          logger.error('Failed to regenerate cover image URL:', error);
         }
       }
     }
@@ -245,7 +246,7 @@ const getTrainingModuleById = async (id) => {
       const url = await generatePresignedDownloadUrl(module.coverImage.key, 7 * 24 * 3600);
       module.coverImage.url = url;
     } catch (error) {
-      console.error('Failed to regenerate cover image URL:', error);
+      logger.error('Failed to regenerate cover image URL:', error);
     }
   }
 
@@ -256,7 +257,7 @@ const getTrainingModuleById = async (id) => {
         const url = await generatePresignedDownloadUrl(item.videoFile.key, 7 * 24 * 3600);
         item.videoFile.url = url;
       } catch (error) {
-        console.error('Failed to regenerate video URL:', error);
+        logger.error('Failed to regenerate video URL:', error);
       }
     }
 
@@ -265,7 +266,7 @@ const getTrainingModuleById = async (id) => {
         const url = await generatePresignedDownloadUrl(item.pdfDocument.key, 7 * 24 * 3600);
         item.pdfDocument.url = url;
       } catch (error) {
-        console.error('Failed to regenerate PDF URL:', error);
+        logger.error('Failed to regenerate PDF URL:', error);
       }
     }
   }

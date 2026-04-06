@@ -169,20 +169,26 @@ DOCUMENT FORMAT - May include: Module headers, 📺 Video Resources, 📝 Quiz (
     ? `
 
 CREATE FROM SCRATCH (no document uploaded): Follow the default template structure.
-- Include 1-2 blog items (introductory content, key concepts) based on the topic.
-- Include 1 quiz item with 3-5 questions, each with 4 options (A, B, C, D) and correct answer marked.
-- Include 1 essay item with 2-3 long-answer practice questions.
-- Order: blog(s) → quiz → essay. Videos will be inserted between blog items automatically.
+${types.includes('blog') ? '- Include 1-2 blog items (introductory content, key concepts) based on the topic.' : '- Do NOT include any blog items.'}
+${types.includes('quiz') ? '- Include 1 quiz item with 3-5 questions, each with 4 options (A, B, C, D) and correct answer marked.' : '- Do NOT include any quiz items.'}
+${types.includes('essay') ? '- Include 1 essay item with 2-3 long-answer practice questions.' : '- Do NOT include any essay items.'}
+- ONLY include content types listed above. Do NOT add types the user did not select.
+- Videos will be inserted between blog items automatically if applicable.
 - Make content appropriate for skill level: ${level || 'intermediate'}.`
     : '';
 
+  const sectionContentParts = [
+    types.includes('blog') ? '1 blog' : null,
+    types.includes('quiz') ? '1 quiz' : null,
+    types.includes('essay') ? '1 essay' : null,
+  ].filter(Boolean);
   const multiSectionSection =
     sectionCount > 1 && !pdfText?.trim()
       ? `
 
 MULTIPLE SECTIONS MODE: User provided ${videoContext?.length || sectionCount} videos. Create ${sectionCount} distinct sections/modules.
-- Each section = 1 blog + 1 quiz + 1 essay. Return a playlist with ${sectionCount} such groups in order.
-- Structure: [blog1, quiz1, essay1, blog2, quiz2, essay2, ...] — ${sectionCount} sections total.
+- Each section = ${sectionContentParts.join(' + ') || '1 blog + 1 quiz + 1 essay'}. Return a playlist with ${sectionCount} such groups in order.
+- ONLY include content types the user selected: ${types.join(', ')}.
 - Each section covers a sub-topic. User will assign their videos to sections manually.`
       : '';
 
@@ -592,7 +598,7 @@ Return ONLY valid JSON (no markdown):
  * @param {{ moduleTitle: string, numModules?: number, level?: string, contentTypes?: string[] }}
  * @returns {Promise<{ moduleName: string, shortDescription: string, level: string, sections: Array<{ title: string, items: Array<{ contentType: string, title: string }> }> }>}
  */
-export async function getPlaylistOutlineFromTitle(moduleTitle, numModules = 3, level = 'intermediate', contentTypes = ['blog', 'quiz', 'essay']) {
+export async function getPlaylistOutlineFromTitle(moduleTitle, numModules = 3, level = 'intermediate', contentTypes = ['blog', 'quiz', 'essay'], counts = {}) {
   if (!moduleTitle || typeof moduleTitle !== 'string' || !moduleTitle.trim()) {
     return { moduleName: '', shortDescription: '', level: 'intermediate', sections: [] };
   }
@@ -605,6 +611,18 @@ export async function getPlaylistOutlineFromTitle(moduleTitle, numModules = 3, l
   const hasQuiz = types.includes('quiz');
   const hasEssay = types.includes('essay');
   const hasVideo = types.includes('video');
+
+  const cBlogs = hasBlog ? Math.max(0, Number(counts.numBlogs ?? 2)) : 0;
+  const cVideos = hasVideo ? Math.max(0, Number(counts.numVideos ?? 2)) : 0;
+  const cQuizzes = hasQuiz ? Math.max(0, Number(counts.numQuizzes ?? 1)) : 0;
+  const cEssays = hasEssay ? Math.max(0, Number(counts.numEssays ?? 1)) : 0;
+
+  const perSectionParts = [];
+  if (cBlogs > 0) perSectionParts.push(`${cBlogs} blog(s) (intro/explanation)`);
+  if (cVideos > 0) perSectionParts.push(`${cVideos} youtube-link item(s) (video placeholders with descriptive titles)`);
+  if (cQuizzes > 0) perSectionParts.push(`${cQuizzes} quiz(zes)`);
+  if (cEssays > 0) perSectionParts.push(`${cEssays} essay(s) (Q&A)`);
+  const perSectionStr = perSectionParts.length ? perSectionParts.join(', ') : '1-2 blogs, 1 quiz, 1 essay';
 
   const prompt = `You are an expert instructional designer. Create a COURSE outline with multiple modules (sections) in succession.
 
@@ -622,8 +640,8 @@ Return valid JSON:
 - "level": "${lev}"
 - "sections": array of ${n} sections. Each section: { "title": "Module 1: Introduction to ...", "items": [ { "contentType": "blog"|"quiz"|"essay"|"youtube-link", "title": "..." }, ... ] }
 
-Per-section structure: ${hasBlog ? '1-2 blogs (intro/explanation), ' : ''}${hasVideo ? '1-2 youtube-link items (video placeholders with descriptive titles, e.g. "Introduction to X - Video"), ' : ''}${hasQuiz ? '1 quiz, ' : ''}${hasEssay ? '1 essay (Q&A)' : ''}. Order within section: blog(s) first${hasVideo ? ', then video(s) (youtube-link)' : ''}, then quiz, then essay.
-IMPORTANT: Use only these contentTypes: blog, quiz, essay${hasVideo ? ', youtube-link' : ''}. ${hasVideo ? 'When "video" is requested, EVERY section MUST include at least one item with "contentType": "youtube-link" and a short "title" (e.g. "Overview video", "Deep dive: Topic X").' : ''}
+Per-section structure: EXACTLY ${perSectionStr}. Order within section: blog(s) first${hasVideo ? ', then video(s) (youtube-link)' : ''}, then quiz, then essay.
+IMPORTANT: Use only these contentTypes: blog, quiz, essay${hasVideo ? ', youtube-link' : ''}. ${hasVideo && cVideos > 0 ? `EVERY section MUST include exactly ${cVideos} item(s) with "contentType": "youtube-link".` : ''}
 
 Return ONLY valid JSON (no markdown):
 {
@@ -634,8 +652,7 @@ Return ONLY valid JSON (no markdown):
     { "title": "Module 1: Introduction to ...", "items": [ { "contentType": "blog", "title": "..." }, ... ] },
     { "title": "Module 2: ...", "items": [ ... ] }
   ]
-}
-${hasVideo ? 'Include at least one { "contentType": "youtube-link", "title": "..." } in each section\'s items array.' : ''}`;
+}`;
 
   const response = await client.chat.completions.create({
     model: 'gpt-4o-mini',
@@ -751,11 +768,12 @@ export async function generateFullPlaylistFromTitleAndConfig({
       
       for (let i = 0; i < numVideos; i++) {
         const video = foundVideos[i];
+        if (!video?.youtubeUrl) continue;
         playlist.push({
           contentType: 'youtube-link',
-          title: video?.title || titlesByType['youtube-link']?.[i] || `${sectionTitle} – Video ${i + 1}`,
-          duration: video?.duration || 5,
-          youtubeUrl: video?.youtubeUrl || '',
+          title: video.title || `${sectionTitle} – Video ${i + 1}`,
+          duration: video.duration || 5,
+          youtubeUrl: video.youtubeUrl,
           sectionTitle,
           sectionIndex: sIdx,
         });

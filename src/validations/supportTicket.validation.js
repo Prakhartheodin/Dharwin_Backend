@@ -28,6 +28,7 @@ const getSupportTickets = {
     status: Joi.string().valid('Open', 'In Progress', 'Resolved', 'Closed'),
     priority: Joi.string().valid('Low', 'Medium', 'High', 'Urgent'),
     category: Joi.string().trim(),
+    search: Joi.string().trim().max(200).allow(''),
     sortBy: Joi.string(),
     limit: Joi.number().integer(),
     page: Joi.number().integer(),
@@ -49,7 +50,10 @@ const updateSupportTicket = {
       status: Joi.string().valid('Open', 'In Progress', 'Resolved', 'Closed'),
       priority: Joi.string().valid('Low', 'Medium', 'High', 'Urgent'),
       category: Joi.string().trim().max(100),
-      assignedTo: Joi.string().custom(objectId),
+      assignedTo: Joi.alternatives().try(
+        Joi.string().custom(objectId),
+        Joi.string().valid('', null).empty('').default(null)
+      ),
     })
     .min(1)
     .required(),
@@ -66,6 +70,7 @@ const addComment = {
         'string.max': 'Comment must not exceed 2000 characters',
         'any.required': 'Comment content is required',
       }),
+      isInternal: Joi.boolean().default(false),
     })
     .required(),
 };

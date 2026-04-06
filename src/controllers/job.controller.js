@@ -290,13 +290,15 @@ const browseApply = catchAsync(async (req, res) => {
     if (!adminUser) {
       throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, 'No admin user found to assign candidate');
     }
+    const userPhone = (req.user.phoneNumber || '').replace(/\D/g, '');
     candidate = await Candidate.create({
       owner: userId,
       adminId: adminUser._id,
       fullName: req.user.name || req.user.email,
       email: emailNorm || req.user.email,
-      phoneNumber: '0000000000',
-      isProfileCompleted: 10,
+      phoneNumber: userPhone || '0000000000',
+      countryCode: req.user.countryCode || undefined,
+      isProfileCompleted: userPhone ? 15 : 10,
     });
   }
 

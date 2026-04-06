@@ -34,7 +34,7 @@ const playlistItemSchema = Joi.object({
   youtubeUrl: Joi.string().uri().when('contentType', {
     is: 'youtube-link',
     then: Joi.required(),
-    otherwise: Joi.optional(),
+    otherwise: Joi.optional().allow('', null),
   }),
   blogContent: Joi.string().when('contentType', {
     is: 'blog',

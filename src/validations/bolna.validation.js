@@ -4,8 +4,8 @@ import { objectId } from './custom.validation.js';
 const initiateCall = {
   body: Joi.object()
     .keys({
-      phone: Joi.string().required().trim(),
-      candidateName: Joi.string().required().trim(),
+      phone: Joi.string().allow('').trim(),
+      candidateName: Joi.string().trim(),
       name: Joi.string().trim(),
       fromPhoneNumber: Joi.string().trim(),
       jobId: Joi.string()
@@ -13,6 +13,7 @@ const initiateCall = {
         .required()
         .messages({ 'any.required': 'jobId is required for job posting verification call' }),
     })
+    .or('candidateName', 'name')
     .required(),
 };
 
@@ -23,7 +24,7 @@ const initiateCandidateCall = {
       candidateName: Joi.string().required().trim(),
       email: Joi.string().email().required().trim(),
       phoneNumber: Joi.string().required().trim(),
-      countryCode: Joi.string().required().trim(),
+      countryCode: Joi.string().allow('').trim(),
       jobId: Joi.string().custom(objectId).required(),
       jobTitle: Joi.string().required().trim(),
       companyName: Joi.string().required().trim(),

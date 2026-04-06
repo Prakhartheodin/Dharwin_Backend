@@ -499,6 +499,7 @@ async function deleteCallRecord(id) {
 async function findRecordsNeedingSync(limit = 20) {
   const list = await CallRecord.find({
     executionId: { $exists: true, $nin: [null, ''] },
+    status: { $nin: ['expired'] },
     $or: [{ transcript: { $in: [null, ''] } }, { recordingUrl: { $in: [null, ''] } }],
   })
     .sort({ createdAt: -1 })
@@ -513,6 +514,7 @@ async function findCallRecordsToSyncForCron(options = {}) {
   const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const filter = {
     executionId: { $exists: true, $nin: [null, ''] },
+    status: { $nin: ['expired'] },
     createdAt: { $gte: thirtyDaysAgo },
     $or: [
       { status: { $in: ['in_progress', 'initiated', 'failed', 'error', 'unknown'] } },

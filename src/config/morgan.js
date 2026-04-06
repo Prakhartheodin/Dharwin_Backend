@@ -13,8 +13,14 @@ const successHandler = morgan(successResponseFormat, {
   stream: { write: (message) => logger.info(message.trim()) },
 });
 
+const EXPECTED_404_PATHS = ['/v1/training/attendance/me'];
+
 const errorHandler = morgan(errorResponseFormat, {
-  skip: (req, res) => res.statusCode < 400,
+  skip: (req, res) => {
+    if (res.statusCode < 400) return true;
+    if (res.statusCode === 404 && EXPECTED_404_PATHS.some((p) => req.originalUrl?.startsWith(p))) return true;
+    return false;
+  },
   stream: { write: (message) => logger.error(message.trim()) },
 });
 

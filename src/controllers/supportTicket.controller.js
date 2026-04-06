@@ -18,7 +18,7 @@ const create = catchAsync(async (req, res) => {
 });
 
 const list = catchAsync(async (req, res) => {
-  const filter = pick(req.query, ['status', 'priority', 'category']);
+  const filter = pick(req.query, ['status', 'priority', 'category', 'search']);
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await querySupportTickets(filter, options, req.user);
   res.send(result);
@@ -40,9 +40,9 @@ const remove = catchAsync(async (req, res) => {
 });
 
 const addComment = catchAsync(async (req, res) => {
-  const { content } = req.body;
+  const { content, isInternal } = req.body;
   const files = req.files || (req.file ? [req.file] : []);
-  const ticket = await addCommentToTicket(req.params.ticketId, content, req.user, files);
+  const ticket = await addCommentToTicket(req.params.ticketId, content, req.user, files, !!isInternal);
   res.status(httpStatus.OK).send(ticket);
 });
 
