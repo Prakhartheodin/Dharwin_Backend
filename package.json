@@ -18,22 +18,11 @@
     "docker:prod": "docker-compose -f docker-compose.yml -f docker-compose.prod.yml up",
     "docker:dev": "docker-compose -f docker-compose.yml -f docker-compose.dev.yml up",
     "prepare": "husky install",
-    "seed:offers": "node scripts/seed-offers-placements.js",
-    "seed:managers": "node scripts/seed-managers.js",
-    "seed:preboarding": "node scripts/seed-preboarding.js",
-    "seed:candidate-role": "node scripts/seed-candidate-role.js",
-    "seed:recruiter-role": "node scripts/seed-recruiter-role.js",
-    "clean:import": "node scripts/clean-and-import-db.js",
-    "cleanup:offers-placements": "node scripts/cleanup-offers-placements.js",
-    "simulate:email-links": "node scripts/simulate-email-links.mjs",
     "docker:livekit": "docker compose -f docker-compose.livekit-local.yml up -d",
     "docker:livekit:down": "docker compose -f docker-compose.livekit-local.yml down",
     "docker:livekit:full": "docker compose -f livekit/docker-compose.yml up -d",
     "docker:livekit:full:down": "docker compose -f livekit/docker-compose.yml down",
-    "provision:platform-super": "node scripts/provision-platform-super-user.js",
-    "verify:permissions": "node scripts/verify-permission-aliases.mjs",
-    "verify:export-filters": "node scripts/verify-candidate-export-filters.mjs",
-    "fix:attendance-tz": "node scripts/fix-attendance-timezone-dates.mjs"
+    "fix:attendance-tz": "echo \"Removed: scripts/ folder was deleted\" && exit 1"
   },
   "keywords": [
     "node",
