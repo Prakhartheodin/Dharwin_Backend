@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import catchAsync from '../utils/catchAsync.js';
 import config from '../config/config.js';
 import * as emailClientService from '../services/emailClient.service.js';
+import * as emailDraftOpenAIService from '../services/emailDraftOpenAI.service.js';
 
 const listGmailAccounts = catchAsync(async (req, res) => {
   const accounts = await emailClientService.listGmailAccounts(req.user.id);
@@ -89,6 +90,11 @@ const sendMessage = catchAsync(async (req, res) => {
     attachments: attachments || [],
   });
   res.status(httpStatus.CREATED).json(result);
+});
+
+const generateDraft = catchAsync(async (req, res) => {
+  const result = await emailDraftOpenAIService.generateEmailDraftOptions(req.body);
+  res.json(result);
 });
 
 const replyMessage = catchAsync(async (req, res) => {
@@ -183,6 +189,7 @@ export {
   getThread,
   getMessage,
   getAttachment,
+  generateDraft,
   sendMessage,
   replyMessage,
   replyAllMessage,

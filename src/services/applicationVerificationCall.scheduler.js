@@ -284,8 +284,18 @@ const startApplicationVerificationCallScheduler = (intervalMinutes = 2) => {
   return id;
 };
 
+const stopApplicationVerificationCallScheduler = (id) => {
+  if (id) {
+    clearInterval(id);
+    logger.info('Application verification call scheduler stopped');
+    return true;
+  }
+  return false;
+};
+
 export default {
   startApplicationVerificationCallScheduler,
+  stopApplicationVerificationCallScheduler,
   runApplicationVerificationCalls,
   syncApplicationCallRecords,
   run,

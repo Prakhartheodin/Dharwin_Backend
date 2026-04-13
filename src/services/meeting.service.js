@@ -123,7 +123,13 @@ const createMeeting = async (body, userId) => {
     const payload = {
       title: meeting.title,
       scheduledAt: meeting.scheduledAt,
+      timezone: meeting.timezone,
       durationMinutes: meeting.durationMinutes,
+      inviteeName: inviteName,
+      hostName: meeting.recruiter?.name || meeting.hosts?.[0]?.nameOrRole || '',
+      interviewType: meeting.interviewType,
+      jobPosition: meeting.jobPosition,
+      description: meeting.description,
       publicMeetingUrl: personalUrl,
     };
     sendMeetingInvitationEmail(to, payload).catch((err) => {
@@ -398,7 +404,13 @@ const resendMeetingInvitations = async (id) => {
       const payload = {
         title: meeting.title,
         scheduledAt: meeting.scheduledAt,
+        timezone: meeting.timezone,
         durationMinutes: meeting.durationMinutes,
+        inviteeName: inviteName,
+        hostName: meeting.recruiter?.name || meeting.hosts?.[0]?.nameOrRole || '',
+        interviewType: meeting.interviewType,
+        jobPosition: meeting.jobPosition,
+        description: meeting.description,
         publicMeetingUrl: personalUrl,
       };
       return sendMeetingInvitationEmail(to, payload)

@@ -669,7 +669,7 @@ const createJobFromTemplate = async (templateId, createdById, jobData) => {
 const publicApplyToJobService = async (jobId, applicationData, files) => {
   // Import necessary services
   const User = (await import('../models/user.model.js')).default;
-  const { generateAuthTokens } = await import('./token.service.js');
+  const { generateAuthTokens, generateResetPasswordToken } = await import('./token.service.js');
 
   // Validate job exists and is Active
   const job = await getJobById(jobId);
@@ -825,18 +825,20 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
   // Generate auth tokens for auto-login
   const tokens = await generateAuthTokens(user);
 
-  // Send welcome email with login credentials (async, don't wait)
+  // Send welcome email with secure account setup instructions (async, don't wait)
   const config = (await import('../config/config.js')).default;
   const { sendJobApplicationWelcomeEmail } = await import('./email.service.js');
   const loginUrl = `${config.frontendBaseUrl || 'http://localhost:3001'}/authentication/sign-in/`;
+  const resetPasswordToken = await generateResetPasswordToken(user.email);
+  const resetPasswordUrl = `${config.frontendBaseUrl || 'http://localhost:3001'}/reset-password?token=${resetPasswordToken}`;
   
   sendJobApplicationWelcomeEmail(user.email, {
     fullName,
     email: user.email,
-    password, // Plain password before hashing
     jobTitle: job.title,
     companyName: job.organisation?.name || 'Company',
     loginUrl,
+    resetPasswordUrl,
   }).catch((err) => {
     console.error('Failed to send welcome email:', err);
     // Don't fail the application if email fails

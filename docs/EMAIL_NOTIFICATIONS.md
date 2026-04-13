@@ -9,7 +9,7 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 | When | How |
 |------|-----|
 | User requests a password reset | **Trigger:** `POST /v1/auth/forgot-password` with `{ email }`. **Flow:** `auth.controller.forgotPassword` → `token.service.generateResetPasswordToken(email)` → `email.service.sendResetPasswordEmail(email, token)`. |
-| **Content** | Subject: "Reset Your Password - Dharwin Business Solutions". Body: link to frontend `/reset-password?token=...` (from `config.frontendBaseUrl`). HTML + plain text. |
+| **Content** | Subject: "Reset your Dharwin password". Body: secure reset link to frontend `/reset-password?token=...` (from `config.frontendBaseUrl`), clearer security guidance, and a personalized greeting when the user name is available. HTML + plain text. |
 
 ---
 
@@ -20,7 +20,7 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 | **A)** User registers as candidate (with invite) | **Trigger:** `POST /v1/auth/register` with `role: 'user'` and `adminId`. **Flow:** `auth.controller.register` → creates User (pending) + Candidate → `generateVerifyEmailToken` → `sendVerificationEmail(user.email, token)`. |
 | **B)** Logged-in user requests verification email | **Trigger:** `POST /v1/auth/send-verification-email` (auth required). **Flow:** `auth.controller.sendVerificationEmail` → `generateVerifyEmailToken(req.user)` → `sendVerificationEmail(req.user.email, token)`. |
 | **C)** Recruiter resends verification for a candidate | **Trigger:** `POST /v1/candidates/:candidateId/resend-verification-email` (candidates.manage). **Flow:** `candidate.controller.resendVerificationEmail` → `candidate.service.resendCandidateVerificationEmail` → resolve **owner User** (fallback: user by `candidate.email`) → `generateVerifyEmailToken(user)` → `sendVerificationEmail(user.email, token, { req })`. Response includes `sentToEmail` (actual inbox). |
-| **Content** | Subject: "Email Verification". Body: link to frontend `/authentication/verify-email/?token=...` (from `getFrontendBaseUrl`). HTML + plain text. |
+| **Content** | Subject: "Verify your Dharwin email address". Body: verification link to frontend `/authentication/verify-email/?token=...` (from `getFrontendBaseUrl`) plus clearer account context and greeting when available. HTML + plain text. |
 
 ---
 
@@ -29,7 +29,7 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 | When | How |
 |------|-----|
 | Recruiter/admin invites candidate(s) to complete onboarding | **Trigger:** `POST /v1/auth/send-candidate-invitation` (auth required). Body: `{ email, onboardUrl }` or `{ invitations: [{ email, onboardUrl }, ...] }`. **Flow:** `auth.controller.sendCandidateInvitation` → `sendCandidateInvitationEmail(email, onboardUrl)` (per recipient). |
-| **Content** | Subject: "You're Invited to Complete Your Onboarding - Dharwin". Body: link to complete onboarding (24h expiry). HTML + plain text. |
+| **Content** | Subject: "`{organisation}: complete your onboarding`". Body: onboarding link, inviter name, organisation context, and 24-hour expiry guidance. HTML + plain text. |
 
 ---
 
@@ -38,7 +38,7 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 | When | How |
 |------|-----|
 | Recruiter shares a candidate profile with an external email | **Trigger:** `POST /v1/candidates/share/:candidateId` with `{ email, withDoc? }`. **Flow:** `candidate.controller.shareProfile` → `shareCandidateProfile` (generates public URL + token) → `sendCandidateProfileShareEmail(email, candidateData, { publicUrl, withDoc, sharedBy })`. |
-| **Content** | Subject: "Candidate Profile: {candidateName}". Body: public profile link, whether documents are included, who shared it. HTML + plain text. |
+| **Content** | Subject: "Candidate profile shared: {candidateName}". Body: public profile link, candidate summary, whether documents are included, and who shared it. HTML + plain text. |
 
 ---
 
@@ -47,7 +47,7 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 | When | How |
 |------|-----|
 | Admin sets a user’s status from `pending` to `active` | **Trigger:** User update (e.g. PATCH user) that changes `status` to `active` from `pending`. **Flow:** `user.service.updateUserById` detects the transition → `sendCandidateAccountActivationEmail(user.email, user.name)` (fire-and-forget, errors logged). |
-| **Content** | Subject: "Your Account Has Been Activated - Dharwin Business Solutions". Body: sign-in link (`/authentication/sign-in/`). HTML + plain text. |
+| **Content** | Subject: "Your Dharwin account is now active". Body: sign-in link (`/authentication/sign-in/`) with clearer activation messaging. HTML + plain text. |
 
 ---
 
@@ -57,7 +57,7 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 |------|-----|
 | **A)** A new meeting is created | **Trigger:** Meeting creation (e.g. via meetings API). **Flow:** `meeting.service.createMeeting` → after saving, collects emails from `hosts`, `emailInvites`, `candidate.email`, `recruiter.email` → for each: `sendMeetingInvitationEmail(to, { title, scheduledAt, durationMinutes, publicMeetingUrl })` (fire-and-forget). |
 | **B)** Invitations are resent for an existing meeting | **Trigger:** Resend meeting invitations (e.g. `resendMeetingInvitations(meetingId)`). **Flow:** `meeting.service.resendMeetingInvitations` → same payload → `sendMeetingInvitationEmail` for each collected email. |
-| **Content** | Subject: "Meeting Invitation: {title}". Body: title, scheduled time, duration, public join link. HTML + plain text. |
+| **Content** | Subject: "Meeting invitation: {title}". Body: title, scheduled time, timezone, host/interview context when available, and the personalised join link. HTML + plain text. |
 
 ---
 
@@ -66,11 +66,29 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 | When | How |
 |------|-----|
 | User shares a job posting by email | **Trigger:** `POST /v1/jobs/:jobId/share-email` with `{ to, message? }`. **Flow:** `job.controller.shareJobEmail` → loads job → `sendJobShareEmail(to, job, message)`. |
-| **Content** | Subject: "Job Opportunity: {title} at {organisation}". Body: job title, org, location, description snippet, link to `/ats/jobs`. HTML + plain text. Optional custom message. |
+| **Content** | Subject: "`{sharerName} shared a job with you: {title}`". Body: sharer name, organisation, location, role summary, link to `/public-job/:id`, and optional custom message. HTML + plain text. |
 
 ---
 
-## 8. Ad-hoc / export emails (generic `sendEmail`)
+## 8. Job application welcome
+
+| When | How |
+|------|-----|
+| Public candidate applies for a job and a new account is created | **Trigger:** Public job application flow in `job.service.publicApplyToJobService`. **Flow:** account is created → reset-password token is generated → `sendJobApplicationWelcomeEmail(...)`. |
+| **Content** | Subject: "Application received: {jobTitle}". Body: application confirmation, account email, secure password creation/reset link, sign-in guidance, and next steps. Passwords are **not** sent by email. HTML + plain text. |
+
+---
+
+## 9. Post-call thank-you
+
+| When | How |
+|------|-----|
+| Candidate completes the verification / interview call flow | **Trigger:** `bolna.controller.sendPostCallEmailAndNotification`. **Flow:** call completes → candidate/job summary is assembled → `sendPostCallThankYouEmail(...)`. |
+| **Content** | Subject: "Thank you for your time, {candidateName}". Body: job summary, next steps, dashboard CTA, and optional browse-more-jobs prompt. HTML + plain text. |
+
+---
+
+## 10. Ad-hoc / export emails (generic `sendEmail`)
 
 | When | How |
 |------|-----|
@@ -90,6 +108,8 @@ All emails are sent via **nodemailer** using the SMTP config in `config.email` (
 | Account activated | User status pending → active | That user | `sendCandidateAccountActivationEmail` |
 | Meeting invitation | Meeting create / resend invitations | Hosts, emailInvites, candidate, recruiter | `sendMeetingInvitationEmail` |
 | Job share | `POST /v1/jobs/:jobId/share-email` | Body `to` | `sendJobShareEmail` |
+| Job application welcome | Public job apply creates an account | Applicant | `sendJobApplicationWelcomeEmail` |
+| Post-call thank-you | Bolna post-call follow-up | Candidate | `sendPostCallThankYouEmail` |
 | Candidate profile (single) | `POST /v1/candidates/:candidateId/export` with `email` | Body `email` | `sendEmail` (plain text) |
 | All candidates CSV | `POST /v1/candidates/export` with `email` | Body `email` | `sendEmail` (CSV) |
 

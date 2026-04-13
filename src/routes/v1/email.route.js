@@ -3,7 +3,6 @@ import config from '../../config/config.js';
 import auth from '../../middlewares/auth.js';
 import validate from '../../middlewares/validate.js';
 import requirePermissions from '../../middlewares/requirePermissions.js';
-import requireRoleByName from '../../middlewares/requireRoleByName.js';
 import * as emailValidation from '../../validations/email.validation.js';
 import * as outlookValidation from '../../validations/outlook.validation.js';
 import * as emailController from '../../controllers/email.controller.js';
@@ -83,6 +82,7 @@ router.get(
   validate(emailValidation.getAttachment),
   emailController.getAttachment
 );
+router.post('/drafts/generate', requirePermissions('emails.manage'), validate(emailValidation.generateDraft), emailController.generateDraft);
 router.post('/messages/send', requirePermissions('emails.manage'), validate(emailValidation.sendMessage), emailController.sendMessage);
 router.post(
   '/messages/:id/reply-all',
@@ -98,46 +98,40 @@ router.delete('/messages/:id', requirePermissions('emails.manage'), validate(ema
 router.get('/labels', requirePermissions('emails.read'), validate(emailValidation.listLabels), emailController.listLabels);
 router.post('/labels', requirePermissions('emails.manage'), validate(emailValidation.createLabel), emailController.createLabel);
 
-// Agent-only: personal email templates & signature (Gmail + Outlook compose use same prefs)
+// Personal email templates & signature (Gmail + Outlook compose use same prefs)
 router.get(
   '/templates',
   requirePermissions('emails.read'),
-  requireRoleByName('Agent'),
   validate(emailValidation.listEmailTemplates),
   emailPreferencesController.listTemplates
 );
 router.post(
   '/templates',
   requirePermissions('emails.manage'),
-  requireRoleByName('Agent'),
   validate(emailValidation.createEmailTemplate),
   emailPreferencesController.createTemplate
 );
 router.patch(
   '/templates/:templateId',
   requirePermissions('emails.manage'),
-  requireRoleByName('Agent'),
   validate(emailValidation.updateEmailTemplate),
   emailPreferencesController.updateTemplate
 );
 router.delete(
   '/templates/:templateId',
   requirePermissions('emails.manage'),
-  requireRoleByName('Agent'),
   validate(emailValidation.deleteEmailTemplate),
   emailPreferencesController.deleteTemplate
 );
 router.get(
   '/signature',
   requirePermissions('emails.read'),
-  requireRoleByName('Agent'),
   validate(emailValidation.getEmailSignature),
   emailPreferencesController.getSignature
 );
 router.patch(
   '/signature',
   requirePermissions('emails.manage'),
-  requireRoleByName('Agent'),
   validate(emailValidation.patchEmailSignature),
   emailPreferencesController.patchSignature
 );

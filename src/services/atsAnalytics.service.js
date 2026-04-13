@@ -4,6 +4,7 @@ import Candidate from '../models/candidate.model.js';
 import JobApplication from '../models/jobApplication.model.js';
 import User from '../models/user.model.js';
 import { getActivityStatistics, getActivityLogsSummary } from './recruiterActivity.service.js';
+import { ensureCandidateProfilesForActiveCandidateUsers } from './candidate.service.js';
 import { userHasRecruiterRole } from '../utils/roleHelpers.js';
 
 const TIME_BUCKETS = 12;
@@ -64,17 +65,24 @@ const getAtsAnalytics = async (options = {}, user = {}) => {
     ? (await Job.find({ createdBy: user._id }, { _id: 1 }).lean()).map((j) => j._id)
     : null;
 
-  const candidateMatch = isRecruiter
-    ? { assignedRecruiter: user._id, isActive: { $ne: false } }
-    : { isActive: { $ne: false } };
+  const ownerIdsWithCandidateRole = await ensureCandidateProfilesForActiveCandidateUsers();
+  const ownerClause =
+    ownerIdsWithCandidateRole === null
+      ? {}
+      : { owner: ownerIdsWithCandidateRole.length > 0 ? { $in: ownerIdsWithCandidateRole } : { $in: [] } };
+
+  const candidateMatch = {
+    ...(isRecruiter ? { assignedRecruiter: user._id, isActive: { $ne: false } } : { isActive: { $ne: false } }),
+    ...ownerClause,
+  };
   const jobMatch = isRecruiter ? { createdBy: user._id } : {};
   const activityFilter = isRecruiter ? { recruiterId: user._id } : {};
 
   const appDateMatch = dateRange ? { createdAt: { $gte: dateRange.start, $lte: dateRange.end } } : {};
 
-  // Use $in with active candidate IDs — excludes both soft-deleted AND hard-deleted candidates
+  // Active candidate docs for application metrics — same owner/Candidate-role rule as list + totals
   const activeCandidateIds = (
-    await Candidate.find({ isActive: { $ne: false } }, { _id: 1 }).lean()
+    await Candidate.find({ isActive: { $ne: false }, ...ownerClause }, { _id: 1 }).lean()
   ).map((c) => c._id);
 
   const existingJobIds = (await Job.find({}, { _id: 1 }).lean()).map((j) => j._id);
@@ -227,8 +235,13 @@ const getDrillDown = async (params, user = {}) => {
   const skip = (page - 1) * limit;
 
   if (type === 'applicationStatus' || type === 'applicationFunnel') {
+    const ownerIdsWithCandidateRole = await ensureCandidateProfilesForActiveCandidateUsers();
+    const ownerClause =
+      ownerIdsWithCandidateRole === null
+        ? {}
+        : { owner: ownerIdsWithCandidateRole.length > 0 ? { $in: ownerIdsWithCandidateRole } : { $in: [] } };
     const activeCandidateIds = (
-      await Candidate.find({ isActive: { $ne: false } }, { _id: 1 }).lean()
+      await Candidate.find({ isActive: { $ne: false }, ...ownerClause }, { _id: 1 }).lean()
     ).map((c) => c._id);
 
     const query = { status: value, candidate: { $in: activeCandidateIds } };

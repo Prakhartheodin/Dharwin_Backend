@@ -258,7 +258,22 @@ const shareJobEmail = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
   const { to, message } = req.body;
-  await sendJobShareEmail(to, job, message);
+  await sendJobShareEmail(to, job, message, {
+    sharerName: req.user.name || 'Dharwin team',
+  });
+  await activityLogService.createActivityLog(
+    String(req.user.id || req.user._id),
+    ActivityActions.JOB_SHARE,
+    EntityTypes.JOB,
+    String(job._id || job.id),
+    {
+      jobTitle: job.title,
+      recipient: to,
+      deliveryMethod: 'email',
+      hasCustomMessage: Boolean(message && String(message).trim()),
+    },
+    req
+  );
   const frontendBase = (await import('../config/config.js')).default?.frontendBaseUrl || 'http://localhost:3001';
   const { notifyByEmail } = await import('../services/notification.service.js');
   notifyByEmail(to, {

@@ -138,7 +138,7 @@ const updateOfferById = async (id, updateBody, currentUser, options = {}) => {
         offer: offer._id,
         candidate: offer.candidate,
         job: offer.job,
-        joiningDate: offer.joiningDate || new Date(),
+        joiningDate: offer.joiningDate || null,
         employeeId: candidate?.employeeId || null,
         status: 'Pending',
         createdBy: offer.createdBy,

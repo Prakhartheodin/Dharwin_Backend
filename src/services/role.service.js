@@ -25,8 +25,70 @@ const createRole = async (roleBody) => {
  * @param {number} [options.page] - Current page (default = 1)
  * @returns {Promise<QueryResult>}
  */
+/**
+ * Per-role user counts for the roles list. "Active/pending" matches ATS candidate owner scope (see getOwnerIdsWithCandidateRole).
+ * @param {import('mongoose').Document[]} roleDocs
+ * @returns {Promise<Record<string, { assigneeCountTotal: number, assigneeCountActivePending: number }>>}
+ */
+const getAssigneeCountsByRoleId = async (roleDocs) => {
+  if (!roleDocs?.length) return {};
+  const ids = roleDocs.map((r) => r._id).filter(Boolean);
+  if (ids.length === 0) return {};
+
+  const [totals, activePending] = await Promise.all([
+    User.aggregate([
+      { $match: { roleIds: { $in: ids } } },
+      { $unwind: '$roleIds' },
+      { $match: { roleIds: { $in: ids } } },
+      { $group: { _id: '$roleIds', count: { $sum: 1 } } },
+    ]),
+    User.aggregate([
+      {
+        $match: {
+          roleIds: { $in: ids },
+          status: { $in: ['active', 'pending'] },
+        },
+      },
+      { $unwind: '$roleIds' },
+      {
+        $match: {
+          roleIds: { $in: ids },
+          status: { $in: ['active', 'pending'] },
+        },
+      },
+      { $group: { _id: '$roleIds', count: { $sum: 1 } } },
+    ]),
+  ]);
+
+  const out = {};
+  for (const id of ids) {
+    const s = String(id);
+    out[s] = { assigneeCountTotal: 0, assigneeCountActivePending: 0 };
+  }
+  for (const row of totals) {
+    const s = String(row._id);
+    if (out[s]) out[s].assigneeCountTotal = row.count;
+  }
+  for (const row of activePending) {
+    const s = String(row._id);
+    if (out[s]) out[s].assigneeCountActivePending = row.count;
+  }
+  return out;
+};
+
 const queryRoles = async (filter, options) => {
   const roles = await Role.paginate(filter, options);
+  const countById = await getAssigneeCountsByRoleId(roles.results || []);
+  roles.results = (roles.results || []).map((doc) => {
+    const id = String(doc._id);
+    const json = typeof doc.toJSON === 'function' ? doc.toJSON() : { ...doc };
+    const c = countById[id] || { assigneeCountTotal: 0, assigneeCountActivePending: 0 };
+    return {
+      ...json,
+      assigneeCountTotal: c.assigneeCountTotal,
+      assigneeCountActivePending: c.assigneeCountActivePending,
+    };
+  });
   return roles;
 };
 
@@ -46,6 +108,21 @@ const getRoleById = async (roleId) => {
  */
 const getRoleByName = async (name) => {
   return Role.findOne({ name: { $regex: new RegExp(`^${name}$`, 'i') } });
+};
+
+/**
+ * User ids that own ATS candidate profiles we treat as candidates: users with the Candidate role (active or pending).
+ * Supports multi-role users (role id in roleIds array).
+ * @returns {Promise<import('mongoose').Types.ObjectId[]|null>} null if the Candidate role document does not exist; otherwise id list (may be empty)
+ */
+const getOwnerIdsWithCandidateRole = async () => {
+  const candidateRole = await getRoleByName('Candidate');
+  if (!candidateRole) return null;
+  const users = await User.find(
+    { roleIds: candidateRole._id, status: { $in: ['active', 'pending'] } },
+    { _id: 1 }
+  ).lean();
+  return users.map((u) => u._id);
 };
 
 /**
@@ -128,6 +205,7 @@ export {
   queryRoles,
   getRoleById,
   getRoleByName,
+  getOwnerIdsWithCandidateRole,
   updateRoleById,
   deleteRoleById,
   getRoleAssigneeDisplaySnapshot,

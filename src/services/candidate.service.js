@@ -171,8 +171,8 @@ const createCandidate = async (ownerId, payload) => {
       // eslint-disable-next-line no-unused-vars -- password intentionally discarded
       const { password, joiningDate: inputJoiningDate, ...rest } = candidateData; // never store password on candidate
       
-      // Default joiningDate to today when account is created
-      const joiningDate = inputJoiningDate ? new Date(inputJoiningDate) : new Date();
+      // Leave joiningDate blank unless it is explicitly provided.
+      const joiningDate = inputJoiningDate ? new Date(inputJoiningDate) : null;
       const candidatePayload = {
         owner: resolvedOwnerId,
         adminId: candidateData.adminId || resolvedOwnerId,
@@ -409,11 +409,64 @@ const buildAdvancedFilter = (filter) => {
   return mongoFilter;
 };
 
+/**
+ * Repair historical drift: active/pending users with the Candidate role must also have a Candidate profile.
+ * Returns the eligible user ids used for ATS owner scoping; null means Candidate role is not configured.
+ * @returns {Promise<import('mongoose').Types.ObjectId[]|null>}
+ */
+const ensureCandidateProfilesForActiveCandidateUsers = async () => {
+  const { getRoleByName } = await import('./role.service.js');
+  const candidateRole = await getRoleByName('Candidate');
+  if (!candidateRole) return null;
+
+  const usersWithCandidateRole = await User.find(
+    { roleIds: candidateRole._id, status: { $in: ['active', 'pending'] } },
+    { _id: 1 }
+  ).lean();
+  const ownerIdsWithCandidateRole = usersWithCandidateRole.map((u) => u._id);
+  if (ownerIdsWithCandidateRole.length === 0) return ownerIdsWithCandidateRole;
+
+  const existingCandidates = await Candidate.find(
+    { owner: { $in: ownerIdsWithCandidateRole } },
+    { owner: 1 }
+  ).lean();
+  const ownersWithProfile = new Set(existingCandidates.map((c) => String(c.owner)).filter(Boolean));
+  const missingOwnerIds = ownerIdsWithCandidateRole.filter((id) => !ownersWithProfile.has(String(id)));
+
+  if (missingOwnerIds.length > 0) {
+    logger.warn(
+      `Reconciling ${missingOwnerIds.length} missing Candidate profile(s) for active/pending Candidate-role user(s)`
+    );
+    await Promise.all(
+      missingOwnerIds.map(async (id) => {
+        try {
+          await ensureCandidateProfileForUser(id);
+        } catch (err) {
+          logger.warn(
+            `ensureCandidateProfilesForActiveCandidateUsers failed userId=${id}: ${err?.message || err}`
+          );
+        }
+      })
+    );
+  }
+
+  return ownerIdsWithCandidateRole;
+};
+
 const queryCandidates = async (filter, options) => {
   const wantOpenSop =
     filter.includeOpenSopCount === true ||
     filter.includeOpenSopCount === 'true' ||
     filter.includeOpenSopCount === '1';
+
+  // Match UI default: when param omitted, treat as "current" employment (exclude past resignDate), not "all".
+  if (
+    filter.employmentStatus === undefined ||
+    filter.employmentStatus === null ||
+    filter.employmentStatus === ''
+  ) {
+    filter.employmentStatus = 'current';
+  }
 
   // Build base MongoDB filter
   const mongoFilter = buildAdvancedFilter(filter);
@@ -432,13 +485,8 @@ const queryCandidates = async (filter, options) => {
 
   // Only show candidates whose owner (User) has the Candidate role – exclude Students, Recruiters, etc. who have a candidate record but not the role
   const { getRoleByName } = await import('./role.service.js');
-  const candidateRole = await getRoleByName('Candidate');
-  if (candidateRole) {
-    const usersWithCandidateRole = await User.find(
-      { roleIds: candidateRole._id, status: { $in: ['active', 'pending'] } },
-      { _id: 1 }
-    ).lean();
-    const ownerIdsWithCandidateRole = usersWithCandidateRole.map((u) => u._id);
+  const ownerIdsWithCandidateRole = await ensureCandidateProfilesForActiveCandidateUsers();
+  if (ownerIdsWithCandidateRole !== null) {
     if (filter.owner) {
       const ownerStr = String(filter.owner);
       const hasRole = ownerIdsWithCandidateRole.some((id) => String(id) === ownerStr);
@@ -1041,6 +1089,13 @@ const getAgentAssignmentSummary = async (scope = {}) => {
     employmentStatus: scope.employmentStatus,
     includeOpenSopCount: false,
   };
+  if (
+    filter.employmentStatus === undefined ||
+    filter.employmentStatus === null ||
+    filter.employmentStatus === ''
+  ) {
+    filter.employmentStatus = 'current';
+  }
   const mongoFilter = buildAdvancedFilter(filter);
 
   if (filter.employmentStatus === 'resigned') {
@@ -1054,13 +1109,8 @@ const getAgentAssignmentSummary = async (scope = {}) => {
   }
 
   const { getRoleByName } = await import('./role.service.js');
-  const candidateRole = await getRoleByName('Candidate');
-  if (candidateRole) {
-    const usersWithCandidateRole = await User.find(
-      { roleIds: candidateRole._id, status: { $in: ['active', 'pending'] } },
-      { _id: 1 }
-    ).lean();
-    const ownerIdsWithCandidateRole = usersWithCandidateRole.map((u) => u._id);
+  const ownerIdsWithCandidateRole = await ensureCandidateProfilesForActiveCandidateUsers();
+  if (ownerIdsWithCandidateRole !== null) {
     mongoFilter.owner =
       ownerIdsWithCandidateRole.length > 0 ? { $in: ownerIdsWithCandidateRole } : { $in: [] };
   }
@@ -1117,15 +1167,8 @@ const deleteCandidateById = async (id) => {
 
   const ownerUser = await User.findById(candidate.owner);
   if (ownerUser) {
-    const { getRoleByName } = await import('./role.service.js');
-    const candidateRole = await getRoleByName('Candidate');
-
-    if (candidateRole) {
-      ownerUser.roleIds = (ownerUser.roleIds || []).filter(
-        (rid) => rid.toString() !== candidateRole._id.toString()
-      );
-    }
-
+    // ATS "delete" soft-offboards: hide profile from active queries and block login, but keep
+    // Candidate role on the User so Settings/role semantics stay aligned (user is not removed).
     ownerUser.status = 'disabled';
     await ownerUser.save();
 
@@ -1788,7 +1831,11 @@ const resendCandidateVerificationEmail = async (candidateId, options = {}) => {
 
   const verifyEmailToken = await generateVerifyEmailToken(user);
   // Always send to the login email for `user`; the JWT verifies this same account.
-  await sendVerificationEmail(user.email, verifyEmailToken, options);
+  await sendVerificationEmail(user.email, verifyEmailToken, {
+    ...options,
+    recipientName: candidate.fullName || user.name || 'there',
+    accountContext: 'candidate verification',
+  });
 
   return {
     success: true,
@@ -2333,6 +2380,23 @@ const ensureCandidateProfileForUser = async (userId) => {
     return existing;
   }
 
+  // Historical repair: some ATS profiles were created with the right email but attached to the wrong owner.
+  // Re-link that profile instead of trying to create a duplicate candidate row (email is unique).
+  const existingByEmail = user.email ? await Candidate.findOne({ email: user.email.toLowerCase().trim() }) : null;
+  if (existingByEmail) {
+    if (String(existingByEmail.owner) !== String(userId)) {
+      logger.warn(
+        `Re-linking Candidate profile by email for userId=${userId} from owner=${existingByEmail.owner} candidateId=${existingByEmail._id}`
+      );
+      existingByEmail.owner = userId;
+    }
+    if (existingByEmail.isActive === false) {
+      existingByEmail.isActive = true;
+    }
+    await existingByEmail.save();
+    return existingByEmail;
+  }
+
   // Find an admin user by looking for users with the Administrator role in their roleIds
   const Role = (await import('../models/role.model.js')).default;
   const adminRole = await Role.findOne({ name: 'Administrator', status: 'active' }).select('_id').lean();
@@ -2567,6 +2631,7 @@ export {
   getCandidateWeekOff,
   // Shift assignment
   assignShiftToCandidates,
+  ensureCandidateProfilesForActiveCandidateUsers,
   ensureCandidateProfileForUser,
   applyInitialCandidateProfileFromAdmin,
   updateUserAndCandidateForMe,

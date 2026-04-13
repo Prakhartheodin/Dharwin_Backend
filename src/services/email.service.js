@@ -14,31 +14,202 @@ if (config.env !== 'test') {
     .catch(() => logger.warn('Unable to connect to email server. Make sure you have configured the SMTP options in .env'));
 }
 
-/**
- * Build branded email HTML wrapper (header + body + footer).
- * @param {string} badgeText - Text shown in top-right of header (e.g. "Secure Password Reset")
- * @param {string} bodyHTML - Inner table rows (content between header and footer)
- * @returns {string} Full HTML email
- */
-const buildEmailHTML = (badgeText, bodyHTML) => `
+const BRAND_NAME = 'Dharwin Business Solutions';
+const DEFAULT_FOOTER_NOTE =
+  'This email was sent automatically by Dharwin Business Solutions because of an action in your account or a workflow initiated for you.';
+
+const escapeHtml = (value) =>
+  String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
+const stripHtml = (value) =>
+  String(value ?? '')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/\s+\n/g, '\n')
+    .replace(/\n\s+/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+
+const truncateText = (value, limit = 280) => {
+  const plain = stripHtml(value);
+  if (plain.length <= limit) return plain;
+  return `${plain.slice(0, Math.max(0, limit - 1)).trimEnd()}...`;
+};
+
+const compactMetadata = (metadata = {}) =>
+  Object.fromEntries(
+    Object.entries(metadata).filter(([, value]) => {
+      if (value === undefined || value === null) return false;
+      if (typeof value === 'string' && !value.trim()) return false;
+      if (Array.isArray(value) && value.length === 0) return false;
+      return true;
+    })
+  );
+
+const formatDateTime = (value, timezone) => {
+  if (!value) return 'TBD';
+  try {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return 'TBD';
+    return new Intl.DateTimeFormat('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      ...(timezone ? { timeZone: timezone } : {}),
+    }).format(date);
+  } catch {
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return 'TBD';
+    }
+  }
+};
+
+const renderParagraphs = (lines = [], fontSize = '15px', color = '#4b5563') =>
+  lines
+    .filter((line) => line !== undefined && line !== null && String(line).trim())
+    .map(
+      (line) =>
+        `<p style="margin:0 0 12px 0;font-size:${fontSize};line-height:1.7;color:${color};">${escapeHtml(line)}</p>`
+    )
+    .join('');
+
+const renderDetailRows = (rows = []) => {
+  const validRows = rows.filter((row) => row && String(row.value ?? '').trim());
+  if (validRows.length === 0) return '';
+  return `
+    <table width="100%" cellpadding="0" cellspacing="0" style="margin:8px 0 0 0;border:1px solid #e5e7eb;border-radius:12px;background-color:#f8fafc;">
+      ${validRows
+        .map(
+          (row, index) => `
+            <tr>
+              <td style="padding:12px 16px;font-size:13px;color:#6b7280;font-weight:600;vertical-align:top;${index < validRows.length - 1 ? 'border-bottom:1px solid #e5e7eb;' : ''}">${escapeHtml(row.label)}</td>
+              <td style="padding:12px 16px;font-size:13px;color:#111827;vertical-align:top;${index < validRows.length - 1 ? 'border-bottom:1px solid #e5e7eb;' : ''}">${escapeHtml(row.value)}</td>
+            </tr>`
+        )
+        .join('')}
+    </table>
+  `;
+};
+
+const SECTION_TONES = {
+  neutral: { bg: '#f8fafc', border: '#e5e7eb', title: '#111827', text: '#475569' },
+  info: { bg: '#eff6ff', border: '#bfdbfe', title: '#1d4ed8', text: '#1e3a8a' },
+  success: { bg: '#f0fdf4', border: '#bbf7d0', title: '#166534', text: '#166534' },
+  warning: { bg: '#fffbeb', border: '#fde68a', title: '#b45309', text: '#92400e' },
+};
+
+const renderSectionCard = (section) => {
+  if (!section) return '';
+  const {
+    title = '',
+    bodyLines = [],
+    detailRows = [],
+    bulletItems = [],
+    tone = 'neutral',
+  } = section;
+  const palette = SECTION_TONES[tone] || SECTION_TONES.neutral;
+  const validBullets = bulletItems.filter((item) => String(item ?? '').trim());
+  const body = renderParagraphs(bodyLines, '14px', palette.text);
+  const rows = renderDetailRows(detailRows);
+  const bullets =
+    validBullets.length > 0
+      ? `<ul style="margin:0;padding-left:20px;color:${palette.text};font-size:14px;line-height:1.7;">
+          ${validBullets.map((item) => `<li style="margin:0 0 8px 0;">${escapeHtml(item)}</li>`).join('')}
+        </ul>`
+      : '';
+  if (!title && !body && !rows && !bullets) return '';
+  return `
+    <div style="margin:20px 0;padding:18px 20px;border:1px solid ${palette.border};border-radius:14px;background-color:${palette.bg};">
+      ${title ? `<p style="margin:0 0 10px 0;font-size:15px;font-weight:700;color:${palette.title};">${escapeHtml(title)}</p>` : ''}
+      ${body}
+      ${rows}
+      ${bullets}
+    </div>
+  `;
+};
+
+const renderActionButtons = (actions = []) => {
+  const validActions = actions.filter((action) => action?.label && action?.href);
+  if (validActions.length === 0) return '';
+  return `
+    <div style="padding:8px 0 0 0;text-align:center;">
+      ${validActions
+        .map((action, index) => {
+          const bg = action.variant === 'secondary' ? '#0f766e' : '#2563eb';
+          return `<a href="${escapeHtml(action.href)}" style="display:inline-block;margin:${index === 0 ? '0 8px 8px 0' : '0 8px 8px 0'};padding:13px 24px;background-color:${bg};color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:700;">${escapeHtml(action.label)}</a>`;
+        })
+        .join('')}
+    </div>
+  `;
+};
+
+const renderFallbackLink = (href, label = 'Open this link in your browser') => {
+  if (!href) return '';
+  return `
+    <div style="margin:20px 0 0 0;padding:16px 18px;border:1px dashed #cbd5e1;border-radius:12px;background-color:#f8fafc;">
+      <p style="margin:0 0 8px 0;font-size:12px;line-height:1.6;color:#6b7280;">${escapeHtml(label)}</p>
+      <p style="margin:0;word-break:break-all;font-size:13px;line-height:1.6;">
+        <a href="${escapeHtml(href)}" style="color:#2563eb;text-decoration:none;">${escapeHtml(href)}</a>
+      </p>
+    </div>
+  `;
+};
+
+const buildEmailHTML = ({
+  badgeText,
+  title,
+  greeting,
+  introLines = [],
+  detailRows = [],
+  sections = [],
+  primaryAction = null,
+  secondaryActions = [],
+  outroLines = [],
+  fallbackUrl = '',
+  fallbackLabel = 'If the button above does not work, use this link instead:',
+  footerNote = DEFAULT_FOOTER_NOTE,
+  preheader = '',
+}) => `
   <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,Helvetica,sans-serif;">
     <tr>
       <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color:#ffffff;border-radius:8px;overflow:hidden;box-shadow:0 4px 12px rgba(15,23,42,0.08);">
+        <span style="display:none!important;visibility:hidden;opacity:0;color:transparent;height:0;width:0;overflow:hidden;mso-hide:all;">${escapeHtml(preheader || title || badgeText || BRAND_NAME)}</span>
+        <table width="600" cellpadding="0" cellspacing="0" style="width:600px;max-width:600px;background-color:#ffffff;border-radius:18px;overflow:hidden;box-shadow:0 10px 30px rgba(15,23,42,0.08);">
           <tr>
-            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px 24px;color:#ffffff;">
+            <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:22px 26px;color:#ffffff;">
               <table width="100%" cellpadding="0" cellspacing="0">
                 <tr>
-                  <td align="left" style="font-size:20px;font-weight:600;">Dharwin Business Solutions</td>
-                  <td align="right" style="font-size:13px;opacity:0.9;">${badgeText}</td>
+                  <td align="left" style="font-size:21px;font-weight:700;">${BRAND_NAME}</td>
+                  <td align="right" style="font-size:13px;opacity:0.92;font-weight:600;">${escapeHtml(badgeText)}</td>
                 </tr>
               </table>
             </td>
           </tr>
-          ${bodyHTML}
           <tr>
-            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#9ca3af;font-size:11px;">
-              <p style="margin:0 0 4px 0;">This email was sent by Dharwin Business Solutions. Please do not reply to this automated message.</p>
+            <td style="padding:30px 32px 26px 32px;color:#111827;">
+              <h1 style="margin:0 0 16px 0;font-size:26px;line-height:1.3;font-weight:700;color:#111827;">${escapeHtml(title)}</h1>
+              ${greeting ? `<p style="margin:0 0 12px 0;font-size:15px;line-height:1.7;color:#374151;">Hello ${escapeHtml(greeting)},</p>` : ''}
+              ${renderParagraphs(introLines)}
+              ${renderDetailRows(detailRows)}
+              ${sections.map((section) => renderSectionCard(section)).join('')}
+              ${renderActionButtons([primaryAction, ...secondaryActions])}
+              ${renderFallbackLink(fallbackUrl || primaryAction?.href, fallbackLabel)}
+              ${renderParagraphs(outroLines, '13px', '#6b7280')}
+            </td>
+          </tr>
+          <tr>
+            <td style="background-color:#f9fafb;border-top:1px solid #e5e7eb;padding:16px 32px;color:#94a3b8;font-size:11px;line-height:1.6;">
+              <p style="margin:0;">${escapeHtml(footerNote)}</p>
             </td>
           </tr>
         </table>
@@ -46,6 +217,48 @@ const buildEmailHTML = (badgeText, bodyHTML) => `
     </tr>
   </table>
 `;
+
+const buildPlainTextEmail = ({
+  title,
+  greeting,
+  introLines = [],
+  detailRows = [],
+  sections = [],
+  primaryAction = null,
+  outroLines = [],
+  footerLines = [],
+}) => {
+  const blocks = [];
+  if (title) blocks.push(title);
+  if (greeting) blocks.push(`Hello ${greeting},`);
+  if (introLines.length) blocks.push(introLines.filter(Boolean).join('\n'));
+  const validRows = detailRows.filter((row) => row && String(row.value ?? '').trim());
+  if (validRows.length) {
+    blocks.push(validRows.map((row) => `${row.label}: ${row.value}`).join('\n'));
+  }
+  sections
+    .filter(Boolean)
+    .forEach((section) => {
+      const lines = [];
+      if (section.title) lines.push(section.title);
+      if (Array.isArray(section.bodyLines) && section.bodyLines.length) {
+        lines.push(...section.bodyLines.filter(Boolean));
+      }
+      if (Array.isArray(section.detailRows) && section.detailRows.length) {
+        lines.push(...section.detailRows.filter((row) => row && String(row.value ?? '').trim()).map((row) => `${row.label}: ${row.value}`));
+      }
+      if (Array.isArray(section.bulletItems) && section.bulletItems.length) {
+        lines.push(...section.bulletItems.filter(Boolean).map((item) => `- ${item}`));
+      }
+      if (lines.length) blocks.push(lines.join('\n'));
+    });
+  if (primaryAction?.href) {
+    blocks.push(`${primaryAction.label || 'Open link'}: ${primaryAction.href}`);
+  }
+  if (outroLines.length) blocks.push(outroLines.filter(Boolean).join('\n'));
+  if (footerLines.length) blocks.push(footerLines.filter(Boolean).join('\n'));
+  return blocks.filter(Boolean).join('\n\n').trim();
+};
 
 /**
  * Send an email and log to EmailLog for audit.
@@ -160,37 +373,44 @@ const queueEmail = (to, subject, text, html, templateName = null, metadata = {})
  * @returns {Promise}
  */
 const sendResetPasswordEmail = async (to, token, options = {}) => {
-  const subject = 'Reset Your Password - Dharwin Business Solutions';
+  const subject = 'Reset your Dharwin password';
   const frontendBase = getFrontendBaseUrl(options.req, options.frontendBaseUrl);
   const resetPasswordUrl = `${frontendBase}/reset-password?token=${token}`;
-  const text = `Dear user,
-
-To reset your password, click on this link: ${resetPasswordUrl}
-
-If you did not request any password resets, then ignore this email.`;
-
-  const bodyHTML = `
-          <tr>
-            <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Password Reset Request</h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Hello,</p>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">We received a request to reset the password for your Dharwin account. If you made this request, please click the button below to choose a new password.</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${resetPasswordUrl}" style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Reset My Password</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">If the button above does not work, copy and paste this link into your browser:</p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${resetPasswordUrl}" style="color:#2563eb;text-decoration:none;">${resetPasswordUrl}</a></p>
-              <p style="margin:0 0 4px 0;">For your security, this link will expire after a short time. If you did not request a password reset, you can safely ignore this email and your password will remain unchanged.</p>
-            </td>
-          </tr>`;
-  const html = buildEmailHTML('Secure Password Reset', bodyHTML);
-  await sendEmail(to, subject, text, html);
+  const recipientName = options.recipientName || 'there';
+  const introLines = [
+    'We received a request to reset the password for your Dharwin account.',
+    'Use the secure button below to choose a new password.',
+  ];
+  const sections = [
+    {
+      title: 'Security note',
+      tone: 'warning',
+      bodyLines: [
+        'If you did not request this change, you can safely ignore this email. Your current password will remain unchanged.',
+      ],
+    },
+  ];
+  const primaryAction = { label: 'Reset password', href: resetPasswordUrl };
+  const outroLines = ['For security, this reset link expires after a short time.'];
+  const text = buildPlainTextEmail({
+    title: 'Password reset request',
+    greeting: recipientName,
+    introLines,
+    sections,
+    primaryAction,
+    outroLines,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Password reset',
+    title: 'Reset your password',
+    greeting: recipientName,
+    introLines,
+    sections,
+    primaryAction,
+    outroLines,
+    preheader: 'Use this secure link to reset your Dharwin password.',
+  });
+  await sendEmail(to, subject, text, html, 'resetPassword', compactMetadata({ recipientName }));
 };
 
 /**
@@ -201,37 +421,45 @@ If you did not request any password resets, then ignore this email.`;
  * @returns {Promise}
  */
 const sendVerificationEmail = async (to, token, options = {}) => {
-  const subject = 'Email Verification';
+  const subject = 'Verify your Dharwin email address';
   const frontendBase = getFrontendBaseUrl(options.req, options.frontendBaseUrl);
   const verificationEmailUrl = `${frontendBase}/authentication/verify-email/?token=${encodeURIComponent(token)}`;
-  const text = `Dear user,
-
-To verify your email, click on this link: ${verificationEmailUrl}
-
-If you did not create an account, then ignore this email.`;
-
-  const bodyHTML = `
-          <tr>
-            <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Confirm your email address</h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Hello,</p>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Thank you for creating a Dharwin account. Please confirm your email address by clicking the button below.</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${verificationEmailUrl}" style="display:inline-block;padding:12px 24px;background-color:#2563eb;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Verify Email</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">If the button above does not work, copy and paste this link into your browser:</p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${verificationEmailUrl}" style="color:#2563eb;text-decoration:none;">${verificationEmailUrl}</a></p>
-              <p style="margin:0 0 4px 0;">If you did not create an account, you can safely ignore this email.</p>
-            </td>
-          </tr>`;
-  const html = buildEmailHTML('Email Verification', bodyHTML);
-  await sendEmail(to, subject, text, html);
+  const recipientName = options.recipientName || 'there';
+  const introLines = [
+    'Please confirm your email address to finish setting up your Dharwin account.',
+  ];
+  const sections = [
+    {
+      title: 'Did not expect this email?',
+      tone: 'warning',
+      bodyLines: ['If you did not create or update an account, you can ignore this message.'],
+    },
+  ];
+  const primaryAction = { label: 'Verify email', href: verificationEmailUrl };
+  const text = buildPlainTextEmail({
+    title: 'Verify your email address',
+    greeting: recipientName,
+    introLines,
+    sections,
+    primaryAction,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Email verification',
+    title: 'Confirm your email address',
+    greeting: recipientName,
+    introLines,
+    sections,
+    primaryAction,
+    preheader: 'Confirm your email address to continue using Dharwin.',
+  });
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'verifyEmail',
+    compactMetadata({ recipientName, accountContext: options.accountContext || 'general' })
+  );
 };
 
 /**
@@ -240,40 +468,62 @@ If you did not create an account, then ignore this email.`;
  * @param {string} onboardUrl - Full URL for candidate to complete onboarding
  * @returns {Promise}
  */
-const sendCandidateInvitationEmail = async (to, onboardUrl) => {
-  const subject = "You're Invited to Complete Your Onboarding - Dharwin";
-  const text = `Dear Candidate,
-
-You have been invited to complete your onboarding. Please use the link below to get started:
-
-${onboardUrl}
-
-This link will expire in 24 hours. If you have any questions, please contact your administrator.
-
-Best regards,
-Dharwin Business Solutions`;
-
-  const bodyHTML = `
-          <tr>
-            <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Complete Your Onboarding</h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">You have been invited to complete your candidate onboarding. Click the button below to get started.</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${onboardUrl}" style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Start Onboarding</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">If the button does not work, copy and paste this link into your browser:</p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${onboardUrl}" style="color:#2563eb;text-decoration:none;">${onboardUrl}</a></p>
-              <p style="margin:0 0 4px 0;">This link expires in 24 hours.</p>
-            </td>
-          </tr>`;
-  const html = buildEmailHTML('Pre-boarding Invitation', bodyHTML);
-  await sendEmail(to, subject, text, html);
+const sendCandidateInvitationEmail = async (to, onboardUrl, options = {}) => {
+  const recipientName = options.recipientName || 'there';
+  const inviterName = options.inviterName || 'our team';
+  const organisationName = options.organisationName || BRAND_NAME;
+  const expiresIn = options.expiresIn || '24 hours';
+  const subject = `${organisationName}: complete your onboarding`;
+  const introLines = [
+    `${inviterName} invited you to complete your onboarding in ${organisationName}.`,
+    'Use the secure link below to review your details and finish the onboarding steps.',
+  ];
+  const detailRows = [
+    { label: 'Invited by', value: inviterName },
+    { label: 'Organisation', value: organisationName },
+    { label: 'Recipient', value: to },
+  ];
+  const sections = [
+    {
+      title: 'Before you start',
+      tone: 'info',
+      bulletItems: [
+        'Keep your identity and contact details ready.',
+        'Complete the form in one session where possible.',
+        `This invitation link expires in ${expiresIn}.`,
+      ],
+    },
+  ];
+  const primaryAction = { label: 'Start onboarding', href: onboardUrl };
+  const outroLines = ['If you were not expecting this invitation, please contact the sender before proceeding.'];
+  const text = buildPlainTextEmail({
+    title: 'Complete your onboarding',
+    greeting: recipientName,
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    outroLines,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Onboarding invite',
+    title: 'Complete your onboarding',
+    greeting: recipientName,
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    outroLines,
+    preheader: `${inviterName} invited you to complete your onboarding in ${organisationName}.`,
+  });
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'candidateInvitation',
+    compactMetadata({ inviterName, organisationName, expiresIn })
+  );
 };
 
 /**
@@ -284,72 +534,50 @@ Dharwin Business Solutions`;
  * @returns {Promise}
  */
 const sendCandidateProfileShareEmail = async (to, candidateData, shareData) => {
-  const { publicUrl, withDoc, sharedBy } = shareData;
-  const subject = `Candidate Profile: ${candidateData.candidateName}`;
+  const { publicUrl, withDoc, sharedBy, roleTitle } = shareData;
+  const candidateName = candidateData.candidateName || 'Candidate';
+  const subject = `Candidate profile shared: ${candidateName}`;
+  const introLines = [
+    `${sharedBy || 'A team member'} shared a candidate profile with you for review.`,
+  ];
+  const detailRows = [
+    { label: 'Candidate', value: candidateName },
+    { label: 'Email', value: candidateData.candidateEmail || 'Available inside the profile' },
+    { label: 'Shared by', value: sharedBy || 'Dharwin team' },
+    { label: 'Documents', value: withDoc ? 'Included' : 'Not included' },
+    { label: 'Role', value: roleTitle || '' },
+  ];
+  const sections = withDoc
+    ? [{ title: 'Included in this share', tone: 'success', bodyLines: ['Supporting candidate documents are available in the shared view.'] }]
+    : [{ title: 'Included in this share', tone: 'warning', bodyLines: ['This shared view does not include supporting documents.'] }];
+  const primaryAction = { label: 'View candidate profile', href: publicUrl };
+  const text = buildPlainTextEmail({
+    title: 'Candidate profile shared with you',
+    greeting: 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Candidate share',
+    title: 'Candidate profile shared with you',
+    greeting: 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    preheader: `${sharedBy || 'A team member'} shared ${candidateName}'s profile with you.`,
+  });
 
-  const text = `Dear Recipient,
-
-A candidate profile has been shared with you:
-
-Name: ${candidateData.candidateName}
-${withDoc ? 'Documents: Included' : 'Documents: Not included'}
-
-View the complete profile: ${publicUrl}
-
-This profile was shared by: ${sharedBy}
-
-Best regards,
-Dharwin Team`;
-
-  const html = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <meta charset="utf-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Candidate Profile Shared - Dharwin</title>
-        <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; }
-            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #1a202c; background-color: #f8fafc; margin: 0; padding: 20px; }
-            .email-container { max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1); overflow: hidden; }
-            .header { background: linear-gradient(135deg, #093464 0%, #0d4a7a 100%); padding: 40px 30px; text-align: center; }
-            .tagline { color: rgba(255, 255, 255, 0.9); font-size: 16px; }
-            .content { padding: 40px; }
-            .profile-preview { background-color: #f8fafc; border-radius: 12px; padding: 30px; margin: 40px 0; border: 1px solid #e2e8f0; text-align: center; }
-            .profile-name { color: #093464; font-size: 24px; font-weight: 700; margin-bottom: 8px; }
-            .profile-email { color: #4a5568; font-size: 16px; margin-bottom: 20px; }
-            .documents-info { background-color: ${withDoc ? '#d1fae5' : '#fef3c7'}; border: 1px solid ${withDoc ? '#a7f3d0' : '#fde68a'}; border-radius: 8px; padding: 16px; margin: 20px 0; text-align: center; color: ${withDoc ? '#065f46' : '#92400e'}; font-weight: 500; }
-            .cta-section { text-align: center; margin: 40px 0; }
-            .button { display: inline-block; padding: 18px 40px; background: linear-gradient(135deg, #36af4c 0%, #2d8f3f 100%); color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; font-size: 16px; }
-            .footer { background-color: #f8fafc; padding: 30px 40px; border-top: 1px solid #e2e8f0; text-align: center; }
-            .footer p { color: #64748b; font-size: 14px; margin-bottom: 8px; }
-        </style>
-    </head>
-    <body>
-        <div class="email-container">
-            <div class="header">
-                <div class="tagline">A candidate profile has been shared with you</div>
-            </div>
-            <div class="content">
-                <div class="profile-preview">
-                    <div class="profile-name">${candidateData.candidateName}</div>
-                    <div class="profile-email">${candidateData.candidateEmail || 'Contact information available in profile'}</div>
-                    <div class="documents-info">${withDoc ? 'Documents are included in this profile' : 'Documents are not included in this profile'}</div>
-                </div>
-                <div class="cta-section">
-                    <a href="${publicUrl}" class="button">View Complete Profile</a>
-                </div>
-                <p style="color: #4a5568; font-size: 16px; margin: 30px 0; text-align: center;">This profile was shared by: ${sharedBy}. Click the button above to view the complete candidate profile.</p>
-            </div>
-            <div class="footer">
-                <p>This profile was shared through Dharwin Business Solutions</p>
-            </div>
-        </div>
-    </body>
-    </html>
-  `;
-
-  await sendEmail(to, subject, text, html);
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'candidateProfileShare',
+    compactMetadata({ candidateName, withDoc, sharedBy, roleTitle })
+  );
 };
 
 /**
@@ -359,39 +587,47 @@ Dharwin Team`;
  * @param {string} name - User name
  * @returns {Promise}
  */
-const sendCandidateAccountActivationEmail = async (to, name) => {
+const sendCandidateAccountActivationEmail = async (to, options = {}) => {
+  const details =
+    typeof options === 'string'
+      ? { recipientName: options }
+      : options;
   const signInUrl = `${getFrontendBaseUrl()}/authentication/sign-in/`;
-  const subject = 'Your Account Has Been Activated - Dharwin Business Solutions';
-  const displayName = name || 'there';
-  const text = `Dear ${displayName},
-
-Your Dharwin account has been activated by an administrator. You can now sign in and access your profile.
-
-Sign in here: ${signInUrl}
-
-If you have any questions, please contact support.`;
-
-  const bodyHTML = `
-          <tr>
-            <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">Your Account Is Ready</h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Hello ${displayName},</p>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">Your account has been activated by an administrator. You can now sign in and access your profile.</p>
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${signInUrl}" style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Sign In Now</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">If the button above does not work, copy and paste this link into your browser:</p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${signInUrl}" style="color:#2563eb;text-decoration:none;">${signInUrl}</a></p>
-            </td>
-          </tr>`;
-  const html = buildEmailHTML('Account Activated', bodyHTML);
-  await sendEmail(to, subject, text, html);
+  const subject = 'Your Dharwin account is now active';
+  const displayName = details.recipientName || 'there';
+  const introLines = [
+    'Your account has been activated and is ready to use.',
+    'Sign in to complete your profile and continue with the next steps in your workflow.',
+  ];
+  const detailRows = [
+    { label: 'Account email', value: to },
+    { label: 'Activated by', value: details.activatedBy || '' },
+  ];
+  const primaryAction = { label: 'Sign in to Dharwin', href: signInUrl };
+  const text = buildPlainTextEmail({
+    title: 'Your account is active',
+    greeting: displayName,
+    introLines,
+    detailRows,
+    primaryAction,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Account activated',
+    title: 'Your account is ready',
+    greeting: displayName,
+    introLines,
+    detailRows,
+    primaryAction,
+    preheader: 'Your Dharwin account has been activated and is ready to use.',
+  });
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'candidateAccountActivation',
+    compactMetadata({ recipientName: displayName, activatedBy: details.activatedBy || null })
+  );
 };
 
 /**
@@ -406,45 +642,74 @@ const sendMeetingInvitationEmail = async (to, payload) => {
     logger.debug(`Skipping meeting invitation email to ${to} (notification preferences)`);
     return;
   }
-  const { title, scheduledAt, durationMinutes, publicMeetingUrl } = payload;
-  const subject = `Meeting Invitation: ${title || 'Dharwin Meeting'}`;
-  const scheduled = scheduledAt ? new Date(scheduledAt).toLocaleString() : 'TBD';
+  const {
+    title,
+    scheduledAt,
+    durationMinutes,
+    publicMeetingUrl,
+    inviteeName,
+    hostName,
+    timezone,
+    interviewType,
+    jobPosition,
+    description,
+  } = payload;
+  const subject = `Meeting invitation: ${title || 'Dharwin meeting'}`;
+  const scheduled = formatDateTime(scheduledAt, timezone);
   const duration = durationMinutes ? `${durationMinutes} minutes` : '';
-  const text = `Dear participant,
-
-You are invited to a meeting:
-
-Title: ${title || 'Meeting'}
-Scheduled: ${scheduled}
-${duration ? `Duration: ${duration}` : ''}
-
-Join here: ${publicMeetingUrl}
-
-Best regards,
-Dharwin Business Solutions`;
-
-  const bodyHTML = `
-          <tr>
-            <td style="padding:28px 32px 12px 32px;color:#111827;">
-              <h1 style="margin:0 0 16px 0;font-size:22px;font-weight:600;color:#111827;">${title || 'Meeting Invitation'}</h1>
-              <p style="margin:0 0 12px 0;font-size:14px;line-height:1.6;color:#4b5563;">You are invited to join a meeting.</p>
-              <p style="margin:0 0 8px 0;font-size:14px;color:#4b5563;"><strong>Scheduled:</strong> ${scheduled}</p>
-              ${duration ? `<p style="margin:0 0 16px 0;font-size:14px;color:#4b5563;"><strong>Duration:</strong> ${duration}</p>` : ''}
-            </td>
-          </tr>
-          <tr>
-            <td align="center" style="padding:8px 32px 24px 32px;">
-              <a href="${publicMeetingUrl}" style="display:inline-block;padding:12px 24px;background-color:#16a34a;color:#ffffff;text-decoration:none;border-radius:999px;font-size:14px;font-weight:600;">Join Meeting</a>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding:0 32px 24px 32px;color:#6b7280;font-size:12px;line-height:1.6;">
-              <p style="margin:0 0 8px 0;">If the button does not work, copy and paste this link into your browser:</p>
-              <p style="margin:0 0 12px 0;word-break:break-all;color:#2563eb;"><a href="${publicMeetingUrl}" style="color:#2563eb;text-decoration:none;">${publicMeetingUrl}</a></p>
-            </td>
-          </tr>`;
-  const html = buildEmailHTML('Meeting Invitation', bodyHTML);
-  await sendEmail(to, subject, text, html);
+  const introLines = [
+    'You have been invited to join a scheduled meeting on Dharwin.',
+    hostName ? `${hostName} is listed as the host for this meeting.` : '',
+  ];
+  const detailRows = [
+    { label: 'Meeting', value: title || 'Meeting' },
+    { label: 'Scheduled time', value: scheduled },
+    { label: 'Timezone', value: timezone || '' },
+    { label: 'Duration', value: duration },
+    { label: 'Host', value: hostName || '' },
+    { label: 'Interview type', value: interviewType || '' },
+    { label: 'Role / position', value: jobPosition || '' },
+  ];
+  const sections = [
+    description
+      ? { title: 'Agenda', tone: 'info', bodyLines: [truncateText(description, 400)] }
+      : null,
+    {
+      title: 'Joining tips',
+      tone: 'neutral',
+      bulletItems: [
+        'Use the personalised join link below for the best access experience.',
+        'Join a few minutes early to test your audio and video setup.',
+      ],
+    },
+  ].filter(Boolean);
+  const primaryAction = { label: 'Join meeting', href: publicMeetingUrl };
+  const text = buildPlainTextEmail({
+    title: 'Meeting invitation',
+    greeting: inviteeName || 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Meeting invitation',
+    title: title || 'Meeting invitation',
+    greeting: inviteeName || 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    preheader: `Meeting scheduled for ${scheduled}.`,
+  });
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'meetingInvitation',
+    compactMetadata({ title, scheduled, timezone, hostName, interviewType, jobPosition })
+  );
 };
 
 /**
@@ -453,27 +718,64 @@ Dharwin Business Solutions`;
  * @param {Object} job - { _id, title, organisation, location, jobDescription }
  * @param {string} [customMessage]
  */
-const sendJobShareEmail = async (to, job, customMessage = '') => {
-  const subject = `Job Opportunity: ${job.title} at ${job.organisation?.name || 'Company'}`;
+const sendJobShareEmail = async (to, job, customMessage = '', options = {}) => {
+  const sharerName = options.sharerName || 'A team member';
+  const organisationName = job.organisation?.name || 'Company';
+  const subject = `${sharerName} shared a job with you: ${job.title}`;
   const jobId = job._id || job.id;
   const jobUrl = `${getFrontendBaseUrl()}/public-job/${jobId}`;
-  const text = `You have been shared a job opportunity:\n\n${job.title}\n${job.organisation?.name || ''}\n${job.location || ''}\n\n${job.jobDescription || ''}\n\nView and apply: ${jobUrl}`;
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,sans-serif;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;">
-        <tr><td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:20px;color:#fff;font-size:18px;font-weight:600;">Job Opportunity</td></tr>
-        <tr><td style="padding:24px;">
-          <h2 style="margin:0 0 12px 0;">${job.title}</h2>
-          <p style="margin:0 0 8px 0;color:#6b7280;">${job.organisation?.name || ''} &bull; ${job.location || ''}</p>
-          ${customMessage ? `<p style="margin:0 0 16px 0;">${customMessage}</p>` : ''}
-          <div style="margin:16px 0;padding:12px;background:#f9fafb;border-radius:6px;">${(job.jobDescription || '').substring(0, 500)}${(job.jobDescription || '').length > 500 ? '...' : ''}</div>
-          <a href="${jobUrl}" style="display:inline-block;padding:12px 24px;background:#16a34a;color:#fff;text-decoration:none;border-radius:6px;font-weight:600;">View & Apply</a>
-        </td></tr>
-      </table>
-    </td></tr>
-  </table>`;
-  await sendEmail(to, subject, text, html);
+  const jobSummary = truncateText(job.jobDescription, 360);
+  const introLines = [
+    `${sharerName} shared this opportunity from ${organisationName}.`,
+    'Review the role details and use the link below if you want to learn more or apply.',
+  ];
+  const detailRows = [
+    { label: 'Role', value: job.title || 'Job opportunity' },
+    { label: 'Organisation', value: organisationName },
+    { label: 'Location', value: job.location || '' },
+    { label: 'Employment type', value: job.jobType || '' },
+  ];
+  const sections = [
+    customMessage && String(customMessage).trim()
+      ? { title: `Message from ${sharerName}`, tone: 'info', bodyLines: [String(customMessage).trim()] }
+      : null,
+    jobSummary
+      ? { title: 'Role summary', tone: 'neutral', bodyLines: [jobSummary] }
+      : null,
+  ].filter(Boolean);
+  const primaryAction = { label: 'View job', href: jobUrl };
+  const text = buildPlainTextEmail({
+    title: 'Job opportunity shared with you',
+    greeting: 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Job share',
+    title: job.title || 'Job opportunity',
+    greeting: 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    preheader: `${sharerName} shared ${job.title || 'a role'} from ${organisationName}.`,
+  });
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'jobShare',
+    compactMetadata({
+      sharerName,
+      jobTitle: job.title,
+      organisationName,
+      location: job.location,
+      hasCustomMessage: Boolean(String(customMessage || '').trim()),
+    })
+  );
 };
 
 /**
@@ -482,111 +784,78 @@ const sendJobShareEmail = async (to, job, customMessage = '') => {
  * @param {Object} data - { fullName, email, password, jobTitle, companyName, loginUrl }
  */
 const sendJobApplicationWelcomeEmail = async (to, data) => {
-  const { fullName, email, password, jobTitle, companyName, loginUrl } = data;
-  
-  const subject = `Welcome! Your application for ${jobTitle} has been submitted`;
-  
-  const text = `
-Hello ${fullName},
+  const { fullName, email, jobTitle, companyName, loginUrl, resetPasswordUrl } = data;
+  const subject = `Application received: ${jobTitle}`;
+  const introLines = [
+    `Thank you for applying for ${jobTitle} at ${companyName}.`,
+    'Your application has been submitted successfully and your Dharwin account is ready.',
+  ];
+  const detailRows = [
+    { label: 'Role', value: jobTitle },
+    { label: 'Company', value: companyName },
+    { label: 'Account email', value: email },
+  ];
+  const sections = [
+    {
+      title: 'Next steps',
+      tone: 'success',
+      bulletItems: [
+        resetPasswordUrl
+          ? 'Create your password using the secure link below.'
+          : 'Sign in using your account email.',
+        'Complete your profile to help the hiring team review your application.',
+        'Track application updates from your dashboard.',
+      ],
+    },
+    {
+      title: 'Security note',
+      tone: 'warning',
+      bodyLines: [
+        resetPasswordUrl
+          ? 'For security, we never include passwords in email. Use the secure link below to set yours.'
+          : 'For security, we never include passwords in email. Use the Forgot Password option if you need to create or reset one.',
+      ],
+    },
+  ];
+  const primaryAction = resetPasswordUrl
+    ? { label: 'Create your password', href: resetPasswordUrl }
+    : { label: 'Sign in to Dharwin', href: loginUrl };
+  const secondaryActions = !resetPasswordUrl && loginUrl
+    ? [{ label: 'Open sign in page', href: loginUrl, variant: 'secondary' }]
+    : [];
+  const outroLines = [
+    'Keep this email for reference until you finish setting up your account.',
+  ];
+  const text = buildPlainTextEmail({
+    title: 'Your application has been submitted',
+    greeting: fullName || 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    outroLines,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Application received',
+    title: 'Your application has been submitted',
+    greeting: fullName || 'there',
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    secondaryActions,
+    outroLines,
+    preheader: `Your application for ${jobTitle} at ${companyName} has been submitted.`,
+  });
 
-Thank you for applying to ${jobTitle} at ${companyName}!
-
-Your application has been successfully submitted and your account has been created.
-
-Login Credentials:
-Email: ${email}
-Password: ${password}
-
-You can now login to complete your profile and track your application status.
-
-Login here: ${loginUrl}
-
-Important: Please keep your login credentials safe. We recommend changing your password after your first login.
-
-Best regards,
-The Recruitment Team
-  `.trim();
-
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,sans-serif;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-        <!-- Header -->
-        <tr>
-          <td style="background:linear-gradient(90deg,#0f766e,#0ea5e9);padding:32px 24px;text-align:center;">
-            <h1 style="margin:0;color:#fff;font-size:24px;font-weight:600;">🎉 Application Submitted!</h1>
-          </td>
-        </tr>
-        
-        <!-- Content -->
-        <tr>
-          <td style="padding:32px 24px;">
-            <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;color:#1f2937;">
-              Hello <strong>${fullName}</strong>,
-            </p>
-            
-            <p style="margin:0 0 24px 0;font-size:16px;line-height:1.6;color:#1f2937;">
-              Thank you for applying to <strong style="color:#0ea5e9;">${jobTitle}</strong> at <strong>${companyName}</strong>! 
-              Your application has been successfully submitted and your account has been created.
-            </p>
-            
-            <!-- Login Credentials Box -->
-            <div style="background:#f9fafb;border:2px solid #e5e7eb;border-radius:8px;padding:20px;margin:0 0 24px 0;">
-              <h2 style="margin:0 0 16px 0;font-size:18px;color:#1f2937;">Your Login Credentials</h2>
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td style="padding:8px 0;">
-                    <strong style="color:#6b7280;font-size:14px;">Email:</strong><br>
-                    <span style="color:#1f2937;font-size:16px;font-family:monospace;">${email}</span>
-                  </td>
-                </tr>
-                <tr>
-                  <td style="padding:8px 0;">
-                    <strong style="color:#6b7280;font-size:14px;">Password:</strong><br>
-                    <span style="color:#1f2937;font-size:16px;font-family:monospace;background:#fff;padding:4px 8px;border-radius:4px;display:inline-block;">${password}</span>
-                  </td>
-                </tr>
-              </table>
-            </div>
-            
-            <!-- CTA Button -->
-            <div style="text-align:center;margin:0 0 24px 0;">
-              <a href="${loginUrl}" style="display:inline-block;padding:14px 32px;background:#0ea5e9;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;">Login to Your Account</a>
-            </div>
-            
-            <!-- Next Steps -->
-            <div style="background:#fef3c7;border-left:4px solid #f59e0b;padding:16px;margin:0 0 24px 0;border-radius:4px;">
-              <p style="margin:0;font-size:14px;color:#92400e;line-height:1.6;">
-                <strong>📋 Next Steps:</strong><br>
-                1. Login to your account<br>
-                2. Complete your profile<br>
-                3. Track your application status<br>
-                4. Explore other opportunities
-              </p>
-            </div>
-            
-            <!-- Security Note -->
-            <p style="margin:0;font-size:14px;color:#6b7280;line-height:1.6;">
-              <strong>🔒 Security Note:</strong> Please keep your login credentials safe. 
-              We recommend changing your password after your first login from your profile settings.
-            </p>
-          </td>
-        </tr>
-        
-        <!-- Footer -->
-        <tr>
-          <td style="background:#f9fafb;padding:20px 24px;text-align:center;border-top:1px solid #e5e7eb;">
-            <p style="margin:0;font-size:14px;color:#6b7280;">
-              Best regards,<br>
-              <strong>The Recruitment Team</strong>
-            </p>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
-  </table>`;
-  
-  await sendEmail(to, subject, text, html);
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'jobApplicationWelcome',
+    compactMetadata({ fullName, email, jobTitle, companyName, hasResetPasswordUrl: Boolean(resetPasswordUrl) })
+  );
 };
 
 const sendPostCallThankYouEmail = async (to, data) => {
@@ -602,138 +871,83 @@ const sendPostCallThankYouEmail = async (to, data) => {
     portalUrl,
   } = data;
 
-  const subject = `Thank you for your time, ${candidateName}! - Dharwin`;
+  const subject = `Thank you for your time, ${candidateName}`;
 
   const durationText = callDuration
     ? `${Math.ceil(callDuration / 60)} minute${Math.ceil(callDuration / 60) > 1 ? 's' : ''}`
     : 'a few minutes';
 
-  const text = `
-Hi ${candidateName},
+  const introLines = [
+    `Thank you for taking ${durationText} to speak with us about ${jobTitle} at ${companyName}.`,
+    'Your responses have been recorded and the recruitment team will review them shortly.',
+  ];
+  const detailRows = [
+    { label: 'Role', value: jobTitle },
+    { label: 'Company', value: companyName },
+    { label: 'Job type', value: jobType || '' },
+    { label: 'Location', value: jobLocation || '' },
+  ];
+  const sections = [
+    {
+      title: 'What happens next',
+      tone: 'success',
+      bulletItems: [
+        'The recruitment team will review your application and interview responses.',
+        'If shortlisted, you will be contacted about the next stage.',
+        'You can track your application status from your Dharwin dashboard.',
+      ],
+    },
+    otherJobsCount > 0
+      ? {
+          title: 'More open opportunities',
+          tone: 'info',
+          bodyLines: [
+            `There ${otherJobsCount === 1 ? 'is' : 'are'} currently ${otherJobsCount} other open position${otherJobsCount > 1 ? 's' : ''} you may want to explore.`,
+          ],
+        }
+      : null,
+    {
+      title: 'Helpful reminder',
+      tone: 'warning',
+      bulletItems: [
+        'Keep your profile and resume up to date.',
+        'Check your email regularly for follow-up steps.',
+      ],
+    },
+  ].filter(Boolean);
+  const primaryAction = { label: 'Track my application', href: loginUrl };
+  const secondaryActions = portalUrl ? [{ label: 'Browse more jobs', href: portalUrl, variant: 'secondary' }] : [];
+  const outroLines = ['If you have questions about the role or the hiring process, please reply to this email.'];
+  const text = buildPlainTextEmail({
+    title: 'Thank you for your time',
+    greeting: candidateName,
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    outroLines,
+  });
+  const html = buildEmailHTML({
+    badgeText: 'Thank you',
+    title: 'Thank you for your time',
+    greeting: candidateName,
+    introLines,
+    detailRows,
+    sections,
+    primaryAction,
+    secondaryActions,
+    outroLines,
+    preheader: `Thank you for speaking with us about ${jobTitle}.`,
+  });
 
-Thank you for taking the time to speak with us regarding your application for ${jobTitle} at ${companyName}!
-
-We appreciate your interest in joining our team. Your responses have been recorded and our recruitment team will review them shortly.
-
-What Happens Next:
-- Our team will review your call and application details
-- If shortlisted, you will be contacted for the next round
-- You can track your application status anytime by logging into your Dharwin account
-
-${otherJobsCount > 0 ? `We also have ${otherJobsCount} other open position${otherJobsCount > 1 ? 's' : ''} that might interest you. Login to explore more opportunities!` : ''}
-
-Login to your account: ${loginUrl}
-
-If you have any questions, feel free to reply to this email.
-
-Best regards,
-The Dharwin Recruitment Team
-  `.trim();
-
-  const html = `
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5fb;padding:24px 0;font-family:Arial,sans-serif;">
-    <tr><td align="center">
-      <table width="600" cellpadding="0" cellspacing="0" style="background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,0.1);">
-        <!-- Header -->
-        <tr>
-          <td style="background:linear-gradient(90deg,#7c3aed,#6d28d9);padding:32px 24px;text-align:center;">
-            <h1 style="margin:0;color:#fff;font-size:22px;font-weight:600;">Thank You, ${candidateName}!</h1>
-            <p style="margin:8px 0 0;color:rgba(255,255,255,0.85);font-size:14px;">We appreciate your time and interest</p>
-          </td>
-        </tr>
-        
-        <!-- Content -->
-        <tr>
-          <td style="padding:32px 24px;">
-            <p style="margin:0 0 16px 0;font-size:16px;line-height:1.6;color:#1f2937;">
-              Hi <strong>${candidateName}</strong>,
-            </p>
-            
-            <p style="margin:0 0 24px 0;font-size:16px;line-height:1.6;color:#1f2937;">
-              Thank you for taking <strong>${durationText}</strong> to speak with us about your application for 
-              <strong style="color:#7c3aed;">${jobTitle}</strong> at <strong>${companyName}</strong>! 
-              Your responses have been recorded and our recruitment team will review them shortly.
-            </p>
-            
-            <!-- Job Summary Box -->
-            <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:8px;padding:20px;margin:0 0 24px 0;">
-              <h3 style="margin:0 0 12px 0;font-size:16px;color:#5b21b6;">Position Applied For</h3>
-              <table width="100%" cellpadding="0" cellspacing="0" style="font-size:14px;color:#374151;">
-                <tr>
-                  <td style="padding:4px 0;"><strong>Role:</strong></td>
-                  <td style="padding:4px 0;">${jobTitle}</td>
-                </tr>
-                <tr>
-                  <td style="padding:4px 0;"><strong>Company:</strong></td>
-                  <td style="padding:4px 0;">${companyName}</td>
-                </tr>
-                ${jobType ? `<tr><td style="padding:4px 0;"><strong>Type:</strong></td><td style="padding:4px 0;">${jobType}</td></tr>` : ''}
-                ${jobLocation ? `<tr><td style="padding:4px 0;"><strong>Location:</strong></td><td style="padding:4px 0;">${jobLocation}</td></tr>` : ''}
-              </table>
-            </div>
-
-            <!-- What's Next -->
-            <div style="background:#f0fdf4;border-left:4px solid #22c55e;padding:16px;margin:0 0 24px 0;border-radius:4px;">
-              <h3 style="margin:0 0 10px 0;font-size:15px;color:#166534;">What Happens Next?</h3>
-              <ol style="margin:0;padding:0 0 0 20px;font-size:14px;color:#374151;line-height:1.8;">
-                <li>Our recruitment team will review your call recording and responses</li>
-                <li>If shortlisted, you'll be contacted for the next interview round</li>
-                <li>You can track your application status in real-time from your dashboard</li>
-                <li>Complete your profile to improve your chances of selection</li>
-              </ol>
-            </div>
-
-            ${otherJobsCount > 0 ? `
-            <!-- Other Opportunities -->
-            <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:16px;margin:0 0 24px 0;">
-              <p style="margin:0;font-size:14px;color:#1e40af;line-height:1.6;">
-                <strong>Explore More Opportunities!</strong><br>
-                We have <strong>${otherJobsCount} other open position${otherJobsCount > 1 ? 's' : ''}</strong> that might interest you. 
-                Login to your account to browse and apply!
-              </p>
-            </div>` : ''}
-
-            <!-- CTA Buttons -->
-            <div style="text-align:center;margin:0 0 24px 0;">
-              <a href="${loginUrl}" style="display:inline-block;padding:14px 32px;background:#7c3aed;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;margin:0 8px 8px 0;">Track My Application</a>
-              ${portalUrl ? `<a href="${portalUrl}" style="display:inline-block;padding:14px 32px;background:#0ea5e9;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;font-size:16px;margin:0 0 8px 0;">Browse More Jobs</a>` : ''}
-            </div>
-
-            <!-- Tips -->
-            <div style="background:#fefce8;border-left:4px solid #eab308;padding:16px;margin:0 0 24px 0;border-radius:4px;">
-              <p style="margin:0;font-size:14px;color:#854d0e;line-height:1.6;">
-                <strong>Tips to Improve Your Chances:</strong><br>
-                - Complete your profile with education, experience, and skills<br>
-                - Upload your latest resume and relevant documents<br>
-                - Keep your phone available for follow-up calls<br>
-                - Check your email regularly for updates
-              </p>
-            </div>
-            
-            <p style="margin:0;font-size:14px;color:#6b7280;line-height:1.6;">
-              If you have any questions about your application or the hiring process, feel free to reply to this email. 
-              We're here to help!
-            </p>
-          </td>
-        </tr>
-        
-        <!-- Footer -->
-        <tr>
-          <td style="background:#f9fafb;padding:20px 24px;text-align:center;border-top:1px solid #e5e7eb;">
-            <p style="margin:0 0 8px 0;font-size:14px;color:#6b7280;">
-              Best regards,<br>
-              <strong style="color:#7c3aed;">The Dharwin Recruitment Team</strong>
-            </p>
-            <p style="margin:0;font-size:12px;color:#9ca3af;">
-              Dharwin - Smart Recruitment Platform
-            </p>
-          </td>
-        </tr>
-      </table>
-    </td></tr>
-  </table>`;
-
-  await sendEmail(to, subject, text, html);
+  await sendEmail(
+    to,
+    subject,
+    text,
+    html,
+    'postCallThankYou',
+    compactMetadata({ candidateName, jobTitle, companyName, jobType, jobLocation, otherJobsCount })
+  );
 };
 
 export {

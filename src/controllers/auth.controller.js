@@ -98,7 +98,11 @@ const register = catchAsync(async (req, res) => {
       isProfileCompleted: completionPercentage,
     });
     const verifyEmailToken = await generateVerifyEmailToken(user);
-    await sendVerificationEmail2(user.email, verifyEmailToken, { req });
+    await sendVerificationEmail2(user.email, verifyEmailToken, {
+      req,
+      recipientName: user.name || 'there',
+      accountContext: 'new candidate account',
+    });
     res.status(httpStatus.CREATED).send({
       user,
       message: 'Registration successful. Your account is pending administrator approval. You will be able to sign in once activated.',
@@ -394,7 +398,11 @@ const refreshTokens = catchAsync(async (req, res) => {
 
 const forgotPassword = catchAsync(async (req, res) => {
   const resetPasswordToken = await generateResetPasswordToken(req.body.email);
-  await sendResetPasswordEmail(req.body.email, resetPasswordToken, { req });
+  const user = await getUserByEmail(req.body.email);
+  await sendResetPasswordEmail(req.body.email, resetPasswordToken, {
+    req,
+    recipientName: user?.name || 'there',
+  });
   res.status(httpStatus.NO_CONTENT).send();
 });
 
@@ -410,14 +418,22 @@ const changePassword = catchAsync(async (req, res) => {
 
 const sendVerificationEmail = catchAsync(async (req, res) => {
   const verifyEmailToken = await generateVerifyEmailToken(req.user);
-  await sendVerificationEmail2(req.user.email, verifyEmailToken, { req });
+  await sendVerificationEmail2(req.user.email, verifyEmailToken, {
+    req,
+    recipientName: req.user.name || 'there',
+    accountContext: 'signed-in user',
+  });
   res.status(httpStatus.NO_CONTENT).send();
 });
 
 /** Send verification email to the currently logged-in user (self-service). No permission required. */
 const sendMyVerificationEmail = catchAsync(async (req, res) => {
   const verifyEmailToken = await generateVerifyEmailToken(req.user);
-  await sendVerificationEmail2(req.user.email, verifyEmailToken, { req });
+  await sendVerificationEmail2(req.user.email, verifyEmailToken, {
+    req,
+    recipientName: req.user.name || 'there',
+    accountContext: 'signed-in user',
+  });
   res.status(httpStatus.NO_CONTENT).send();
 });
 
@@ -428,13 +444,19 @@ const verifyEmail = catchAsync(async (req, res) => {
 
 const sendCandidateInvitation = catchAsync(async (req, res) => {
   const { email, onboardUrl, invitations } = req.body;
+  const actorId = String(req.user.id || req.user._id);
+  const onboardingEntityId = 'onboarding-invite';
 
   if (invitations && Array.isArray(invitations)) {
     const results = { successful: [], failed: [], total: invitations.length };
     const { notifyByEmail } = await import('../services/notification.service.js');
     const emailPromises = invitations.map(async (invitation) => {
       try {
-        await sendCandidateInvitationEmail(invitation.email, invitation.onboardUrl);
+        await sendCandidateInvitationEmail(invitation.email, invitation.onboardUrl, {
+          inviterName: req.user.name || 'Dharwin team',
+          organisationName: 'Dharwin Business Solutions',
+          expiresIn: '24 hours',
+        });
         notifyByEmail(invitation.email, {
           type: 'general',
           title: "You're invited to complete your onboarding",
@@ -447,12 +469,48 @@ const sendCandidateInvitation = catchAsync(async (req, res) => {
       }
     });
     await Promise.allSettled(emailPromises);
+    if (results.successful.length > 0) {
+      await activityLogService.createActivityLog(
+        actorId,
+        ActivityActions.CANDIDATE_ONBOARDING_SHARE,
+        EntityTypes.CANDIDATE,
+        onboardingEntityId,
+        {
+          deliveryMethod: 'email',
+          inviteMode: invitations.length > 1 ? 'bulk' : 'single',
+          invitationCount: invitations.length,
+          successfulCount: results.successful.length,
+          failedCount: results.failed.length,
+          recipients: results.successful.map((entry) => entry.email),
+        },
+        req
+      );
+    }
     res.status(httpStatus.OK).json({
       message: `Bulk invitation completed. ${results.successful.length} successful, ${results.failed.length} failed.`,
       results,
     });
   } else {
-    await sendCandidateInvitationEmail(email, onboardUrl);
+    await sendCandidateInvitationEmail(email, onboardUrl, {
+      inviterName: req.user.name || 'Dharwin team',
+      organisationName: 'Dharwin Business Solutions',
+      expiresIn: '24 hours',
+    });
+    await activityLogService.createActivityLog(
+      actorId,
+      ActivityActions.CANDIDATE_ONBOARDING_SHARE,
+      EntityTypes.CANDIDATE,
+      onboardingEntityId,
+      {
+        deliveryMethod: 'email',
+        inviteMode: 'single',
+        invitationCount: 1,
+        successfulCount: 1,
+        failedCount: 0,
+        recipient: email,
+      },
+      req
+    );
     const { notifyByEmail } = await import('../services/notification.service.js');
     notifyByEmail(email, {
       type: 'general',

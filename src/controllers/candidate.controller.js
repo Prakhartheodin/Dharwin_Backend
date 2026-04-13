@@ -557,7 +557,8 @@ const shareProfile = catchAsync(async (req, res) => {
   const emailShareData = {
     publicUrl: shareResult.publicUrl,
     withDoc,
-    sharedBy: req.user.name
+    sharedBy: req.user.name,
+    roleTitle: candidate.designation || ''
   };
   await sendCandidateProfileShareEmail(email, candidateData, emailShareData);
   const { notifyByEmail } = await import('../services/notification.service.js');

@@ -31,7 +31,9 @@ const createUser = async (userBody, options = {}) => {
     await ensureStudentProfileForUser(user.id).catch(() => {});
     // eslint-disable-next-line import/no-cycle
     const { ensureCandidateProfileForUser } = await import('./candidate.service.js');
-    await ensureCandidateProfileForUser(user.id).catch(() => {});
+    await ensureCandidateProfileForUser(user.id).catch((err) => {
+      logger.warn(`ensureCandidateProfileForUser failed after User.create userId=${user.id}: ${err?.message || err}`);
+    });
   }
   return user;
 };
@@ -172,7 +174,9 @@ const updateUserById = async (userId, updateBody) => {
     await ensureStudentProfileForUser(user.id).catch(() => {});
     // eslint-disable-next-line import/no-cycle
     const { ensureCandidateProfileForUser } = await import('./candidate.service.js');
-    await ensureCandidateProfileForUser(user.id).catch(() => {});
+    await ensureCandidateProfileForUser(user.id).catch((err) => {
+      logger.warn(`ensureCandidateProfileForUser failed after updateUserById userId=${userId}: ${err?.message || err}`);
+    });
   }
   return user;
 };

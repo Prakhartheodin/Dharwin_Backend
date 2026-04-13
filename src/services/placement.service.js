@@ -92,7 +92,7 @@ const updatePlacementStatus = async (id, updateBody, currentUser) => {
     placement.status = updateBody.status;
   }
   if (updateBody.joiningDate !== undefined) {
-    placement.joiningDate = new Date(updateBody.joiningDate);
+    placement.joiningDate = updateBody.joiningDate ? new Date(updateBody.joiningDate) : null;
   }
   if (updateBody.notes !== undefined) {
     placement.notes = updateBody.notes;

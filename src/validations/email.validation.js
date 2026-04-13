@@ -62,6 +62,17 @@ const getAttachment = {
   }),
 };
 
+const generateDraft = {
+  body: Joi.object().keys({
+    tone: Joi.string().trim().valid('professional', 'friendly', 'formal', 'persuasive', 'empathetic').required(),
+    prompt: Joi.string().trim().min(3).max(2000).required(),
+    subject: Joi.string().trim().max(500).allow('').default(''),
+    context: Joi.string().trim().max(4000).allow('').default(''),
+    recipientName: Joi.string().trim().max(200).allow('').default(''),
+    length: Joi.string().trim().valid('short', 'medium', 'long').default('medium'),
+  }),
+};
+
 const sendMessage = {
   body: Joi.object().keys({
     accountId: Joi.string().custom(objectId).required(),
@@ -289,6 +300,7 @@ export {
   getThread,
   getMessage,
   getAttachment,
+  generateDraft,
   sendMessage,
   replyMessage,
   replyAllMessage,
