@@ -311,6 +311,10 @@ const publicApplyToJob = {
       'any.required': 'Country code is required',
     }),
     coverLetter: Joi.string().optional().trim().allow('', null),
+    // Multipart parsers can surface file field names on req.body while the files
+    // themselves are available on req.files via multer.
+    resume: Joi.any().optional(),
+    documents: Joi.any().optional(),
   }).required(),
 };
 

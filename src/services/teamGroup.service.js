@@ -1,5 +1,7 @@
 import httpStatus from 'http-status';
 import TeamGroup from '../models/teamGroup.model.js';
+import TeamMember from '../models/team.model.js';
+import Project from '../models/project.model.js';
 import ApiError from '../utils/ApiError.js';
 import { userIsAdmin } from '../utils/roleHelpers.js';
 
@@ -87,6 +89,9 @@ const deleteTeamGroupById = async (id, currentUser) => {
   if (!canDelete) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
+  const teamOid = team._id;
+  await TeamMember.deleteMany({ teamId: teamOid }).exec();
+  await Project.updateMany({ assignedTeams: teamOid }, { $pull: { assignedTeams: teamOid } }).exec();
   await team.deleteOne();
   return team;
 };

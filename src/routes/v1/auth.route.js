@@ -29,7 +29,7 @@ router.post('/reset-password', validate(authValidation.resetPassword), authContr
 router.post('/change-password', auth(), validate(authValidation.changePassword), authController.changePassword);
 router.post('/send-verification-email', auth(), requirePermissions('users.manage'), authController.sendVerificationEmail);
 router.post('/verify-email', validate(authValidation.verifyEmail), authController.verifyEmail);
-router.post('/send-candidate-invitation', auth(), requirePermissions('candidates.manage'), validate(authValidation.sendCandidateInvitation), authController.sendCandidateInvitation);
+router.post('/send-candidate-invitation', auth(), requirePermissions('share-candidate-form.read'), validate(authValidation.sendCandidateInvitation), authController.sendCandidateInvitation);
 
 export default router;
 

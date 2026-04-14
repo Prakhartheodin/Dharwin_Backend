@@ -41,7 +41,7 @@ function truncateToBalancedJson(str) {
 }
 
 /** Parse JSON, repairing common AI output issues (trailing commas, truncated content). */
-function parseJsonWithRepair(text, context = '') {
+export function parseJsonWithRepair(text, context = '') {
   const raw = (text || '').trim();
   const cleaned = raw
     .replace(/```json\s?/gi, '')
@@ -310,7 +310,6 @@ ${hasNestedModules ? `Generate content for ALL ${extractedModules.length} module
  */
 export async function generateBlogForModule({ documentName, moduleName }) {
   const client = getClient();
-  const theme = [documentName, moduleName].filter(Boolean).join(' — ');
   const prompt = `You are writing a short learning blog for a training module.
 Course/document context: ${documentName || 'Training'}
 Module: ${moduleName || 'Module'}

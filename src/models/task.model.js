@@ -29,6 +29,8 @@ const taskSchema = new mongoose.Schema(
     },
     dueDate: { type: Date },
     tags: [{ type: String, trim: true }],
+    /** Optional hints from AI task breakdown for staffing (e.g. Python, React). */
+    requiredSkills: [{ type: String, trim: true }],
     assignedTo: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
     projectId: { type: mongoose.Schema.Types.ObjectId, ref: 'Project', index: true },
     likesCount: { type: Number, default: 0 },

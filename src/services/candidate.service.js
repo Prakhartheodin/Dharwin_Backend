@@ -453,6 +453,23 @@ const ensureCandidateProfilesForActiveCandidateUsers = async () => {
   return ownerIdsWithCandidateRole;
 };
 
+/**
+ * User ids with Candidate role (active/pending). Same owner scope as ATS `listCandidates` when the Candidate role exists.
+ * Read-only — does not create missing Candidate profiles (unlike {@link ensureCandidateProfilesForActiveCandidateUsers}).
+ * @returns {Promise<import('mongoose').Types.ObjectId[]|null>} null if the Candidate role is not configured
+ */
+const getCandidateRoleOwnerIdsForAssignmentRoster = async () => {
+  const { getRoleByName } = await import('./role.service.js');
+  const candidateRole = await getRoleByName('Candidate');
+  if (!candidateRole) return null;
+
+  const usersWithCandidateRole = await User.find(
+    { roleIds: candidateRole._id, status: { $in: ['active', 'pending'] } },
+    { _id: 1 }
+  ).lean();
+  return usersWithCandidateRole.map((u) => u._id);
+};
+
 const queryCandidates = async (filter, options) => {
   const wantOpenSop =
     filter.includeOpenSopCount === true ||
@@ -2632,6 +2649,7 @@ export {
   // Shift assignment
   assignShiftToCandidates,
   ensureCandidateProfilesForActiveCandidateUsers,
+  getCandidateRoleOwnerIdsForAssignmentRoster,
   ensureCandidateProfileForUser,
   applyInitialCandidateProfileFromAdmin,
   updateUserAndCandidateForMe,

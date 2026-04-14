@@ -35,8 +35,8 @@ if (config.env !== 'test') {
 // set security HTTP headers
 app.use(helmet());
 
-// parse json request body
-app.use(express.json());
+// parse json request body (default ~100kb is too small for PM task-breakdown/apply with many long descriptions)
+app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '2mb' }));
 
 // parse cookies (needed for auth from cookie)
 app.use(cookieParser());
@@ -95,6 +95,9 @@ const corsOptions = {
     'X-Activity-Client-Geo',
     'x-client-ip',
     'X-Client-Ip',
+    /** PM assistant task apply + other idempotent writes from the browser */
+    'Idempotency-Key',
+    'idempotency-key',
   ],
   exposedHeaders: ['Authorization'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],

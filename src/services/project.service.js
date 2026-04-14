@@ -47,8 +47,13 @@ const queryProjects = async (filter, options) => {
   }
 
   const isAdmin = await userIsAdmin({ roleIds: filter.userRoleIds || [] });
-  if (!isAdmin && filter.userId) {
-    const userId = filter.userId;
+  const userId = filter.userId;
+  const mineOnly =
+    filter.mine === true || filter.mine === 'true' || filter.mine === '1' || filter.mine === 1;
+  delete filter.mine;
+  if (!isAdmin && userId) {
+    filter.createdBy = userId;
+  } else if (isAdmin && mineOnly && userId) {
     filter.createdBy = userId;
   }
   delete filter.userRoleIds;

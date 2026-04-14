@@ -43,6 +43,7 @@ import projectRoute from './project.route.js';
 import taskRoute from './task.route.js';
 import teamRoute from './team.route.js';
 import teamGroupRoute from './teamGroup.route.js';
+import pmAssistantRoute from './pmAssistant.route.js';
 import bolnaRoute from './bolna.route.js';
 import voiceAgentRoute from './voiceAgent.route.js';
 import voiceKbRoute from './voiceKb.route.js';
@@ -197,6 +198,10 @@ const defaultRoutes = [
   {
     path: '/project-teams',
     route: teamGroupRoute,
+  },
+  {
+    path: '/pm-assistant',
+    route: pmAssistantRoute,
   },
   {
     path: '/training/students',

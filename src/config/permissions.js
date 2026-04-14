@@ -59,6 +59,14 @@ export const permissionAliases = {
     'interviews.manage',
   ],
   'candidates.manage': ['candidates.manage', 'ats.candidates:view,create,edit,delete'],
+  // Share candidate form: dedicated ATS sidebar/page permission, while preserving access for existing candidate managers.
+  'share-candidate-form.read': [
+    'share-candidate-form.read',
+    'share-candidate-form.manage',
+    'ats.share-candidate-form:view',
+    'ats.share-candidate-form:view,create,edit,delete',
+    'candidates.manage',
+  ],
   // Joining date PATCH: full manage OR granular ats.candidates.joiningDate:view,edit → candidates.joiningDate.manage
   'candidates.joiningDate': [
     'candidates.manage',

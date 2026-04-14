@@ -36,6 +36,8 @@ const getProjects = {
     search: Joi.string().optional(),
     status: Joi.string().valid('Inprogress', 'On hold', 'completed').optional(),
     priority: Joi.string().valid('High', 'Medium', 'Low').optional(),
+    /** When true, restrict to projects created by the current user (even for admins). */
+    mine: Joi.alternatives().try(Joi.boolean(), Joi.string().valid('true', 'false', '1', '0')).optional(),
     sortBy: Joi.string().optional(),
     limit: Joi.number().integer().optional(),
     page: Joi.number().integer().optional(),
