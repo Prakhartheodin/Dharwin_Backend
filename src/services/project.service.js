@@ -201,7 +201,7 @@ const deleteProjectById = async (id, currentUser) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
 
-  const projectOid = project._id;
+  const projectOid = new mongoose.Types.ObjectId(String(project._id));
   await Promise.all([
     Task.deleteMany({ projectId: projectOid }),
     TaskBreakdownIdempotency.deleteMany({ projectId: projectOid }),

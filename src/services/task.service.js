@@ -80,15 +80,20 @@ const queryTasks = async (filter, options) => {
     };
   }
 
-  /** Tasks whose project was deleted still had projectId set; hide from user-facing lists. */
-  if (userId && (assignedToMe || !isAdmin) && mongoose.Types.ObjectId.isValid(String(userId))) {
+  /** Tasks whose project was deleted but projectId still points nowhere — hide from all lists (incl. admin). */
+  let orphanMatch = null;
+  if (isAdmin) {
+    orphanMatch = { projectId: { $ne: null } };
+  } else if (userId && mongoose.Types.ObjectId.isValid(String(userId))) {
     const userOid = new mongoose.Types.ObjectId(String(userId));
-    const orphanMatch = assignedToMe
+    orphanMatch = assignedToMe
       ? { assignedTo: userOid, projectId: { $ne: null } }
       : {
           projectId: { $ne: null },
           $or: [{ createdBy: userOid }, { assignedTo: userOid }],
         };
+  }
+  if (orphanMatch) {
     const orphanRows = await Task.aggregate([
       { $match: orphanMatch },
       {
