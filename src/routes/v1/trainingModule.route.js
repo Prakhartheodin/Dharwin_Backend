@@ -10,10 +10,13 @@ import * as aiGenerateController from '../../controllers/trainingModuleAI.contro
 const router = express.Router();
 
 // Configure multer for file uploads
+const maxTrainingUploadBytes =
+  Number(process.env.TRAINING_MODULE_MAX_UPLOAD_BYTES) || 80 * 1024 * 1024;
+
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 500 * 1024 * 1024, // 500MB max file size
+    fileSize: maxTrainingUploadBytes,
   },
 });
 

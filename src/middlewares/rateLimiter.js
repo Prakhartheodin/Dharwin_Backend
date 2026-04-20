@@ -1,11 +1,45 @@
 import rateLimit from 'express-rate-limit';
 import config from '../config/config.js';
 
-const authLimiter = rateLimit({
+/** Count only failed attempts (e.g. wrong password) — use on POST /auth/login only. */
+const authLoginLimiter = rateLimit({
   windowMs: (config.rateLimit?.authWindowMinutes ?? 15) * 60 * 1000,
-  max: config.rateLimit?.authMax ?? 500,
+  max: config.rateLimit?.authMax ?? 80,
   skipSuccessfulRequests: true,
   message: { message: 'Too many sign-in attempts. Please try again later.' },
+});
+
+/**
+ * Every request counts (including 2xx). Use on forgot-password, verify-email, reset-password,
+ * and unauthenticated registration paths so email/SMTP abuse cannot bypass skipSuccessfulRequests.
+ */
+const authStrictFlowLimiter = rateLimit({
+  windowMs: (config.rateLimit?.authStrictWindowMinutes ?? 15) * 60 * 1000,
+  max: config.rateLimit?.authStrictMax ?? 30,
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again later.' },
+});
+
+/** Public registration / onboarding — tighter cap per IP. */
+const publicRegistrationLimiter = rateLimit({
+  windowMs: (config.rateLimit?.publicRegistrationWindowMinutes ?? 60) * 60 * 1000,
+  max: config.rateLimit?.publicRegistrationMax ?? 45,
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many registration attempts. Please try again later.' },
+});
+
+/** Other unauthenticated POSTs under /v1/public (LiveKit, meetings, job apply, etc.). */
+const publicWriteLimiter = rateLimit({
+  windowMs: (config.rateLimit?.publicWriteWindowMinutes ?? 15) * 60 * 1000,
+  max: config.rateLimit?.publicWriteMax ?? 120,
+  skipSuccessfulRequests: false,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again later.' },
 });
 
 const attendancePunchLimiter = rateLimit({
@@ -25,7 +59,10 @@ const jobsBrowseLimiter = rateLimit({
 });
 
 export {
-  authLimiter,
+  authLoginLimiter,
+  authStrictFlowLimiter,
+  publicRegistrationLimiter,
+  publicWriteLimiter,
   attendancePunchLimiter,
   jobsBrowseLimiter,
 };

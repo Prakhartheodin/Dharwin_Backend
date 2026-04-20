@@ -17,7 +17,7 @@ const envVarsSchema = Joi.object()
     NODE_ENV: Joi.string().valid('production', 'development', 'test').required(),
     PORT: Joi.number().default(3000),
     MONGODB_URL: Joi.string().required().description('MongoDB URL'),
-    JWT_SECRET: Joi.string().required().description('JWT secret key'),
+    JWT_SECRET: Joi.string().min(32).required().description('JWT secret key (min 32 characters)'),
     JWT_ACCESS_EXPIRATION_MINUTES: Joi.number().default(30).description('minutes after which access tokens expire'),
     JWT_REFRESH_EXPIRATION_DAYS: Joi.number().default(30).description('days after which refresh tokens expire'),
     JWT_RESET_PASSWORD_EXPIRATION_MINUTES: Joi.number()
@@ -39,8 +39,16 @@ const envVarsSchema = Joi.object()
     AWS_REGION: Joi.string().default('us-east-1').description('AWS region'),
     AWS_S3_BUCKET_NAME: Joi.string().description('AWS S3 bucket name'),
 
-    // CORS / Frontend
-    CORS_ORIGIN: Joi.string().optional().description('Allowed CORS origin (comma-separated for multiple origins)'),
+    // CORS / Frontend — required in production (comma-separated origins)
+    CORS_ORIGIN: Joi.when('NODE_ENV', {
+      is: 'production',
+      then: Joi.string().trim().min(5).required().description('Allowed CORS origins (comma-separated); required in production'),
+      otherwise: Joi.string().allow('').optional().description('Allowed CORS origin (comma-separated for multiple origins)'),
+    }),
+    /** When set, Bolna webhooks must send matching `X-Bolna-Webhook-Secret`. Required behavior in production (see verifyWebhook middleware). */
+    BOLNA_WEBHOOK_SECRET: Joi.string().optional().allow('').description('Shared secret for Bolna webhook requests'),
+    /** Default true; set to false only for dev SMTP with self-signed certs */
+    SMTP_TLS_REJECT_UNAUTHORIZED: Joi.string().valid('true', 'false', '1', '0', '').optional().allow(null).empty(''),
     FRONTEND_BASE_URL: Joi.string().optional().description('Frontend base URL for email links'),
     BACKEND_PUBLIC_URL: Joi.string().optional().description('Backend public URL for share links (e.g. https://api.example.com)'),
 
@@ -89,11 +97,21 @@ const envVarsSchema = Joi.object()
 
     // Auth rate limit (deployed apps often share IPs; increase to avoid 429 on sign-in)
     RATE_LIMIT_AUTH_WINDOW_MINUTES: Joi.number().optional().default(15).description('Auth rate limit window in minutes'),
-    RATE_LIMIT_AUTH_MAX: Joi.number().optional().default(500).description('Max failed auth requests per window per IP'),
+    RATE_LIMIT_AUTH_MAX: Joi.number().optional().default(80).description('Max failed auth requests per window per IP'),
     RATE_LIMIT_JOBS_BROWSE_PER_MINUTE: Joi.number()
       .optional()
       .default(120)
       .description('Max GET /jobs/browse (and detail) requests per IP per minute'),
+
+    /** Max requests per IP per window for auth routes that must count every call (forgot-password, verify-email, reset-password, self-registration). */
+    RATE_LIMIT_AUTH_STRICT_MAX: Joi.number().integer().min(5).optional().default(30),
+    RATE_LIMIT_AUTH_STRICT_WINDOW_MINUTES: Joi.number().integer().min(1).optional().default(15),
+    /** Shared bucket for POST /public/register, /register-candidate, /jobs/:id/apply (per IP). */
+    RATE_LIMIT_PUBLIC_REGISTRATION_MAX: Joi.number().integer().min(5).optional().default(45),
+    RATE_LIMIT_PUBLIC_REGISTRATION_WINDOW_MINUTES: Joi.number().integer().min(5).optional().default(60),
+    /** Other unauthenticated POSTs under /v1/public (LiveKit, recording, meetings). */
+    RATE_LIMIT_PUBLIC_WRITE_MAX: Joi.number().integer().min(10).optional().default(120),
+    RATE_LIMIT_PUBLIC_WRITE_WINDOW_MINUTES: Joi.number().integer().min(1).optional().default(15),
 
     // Reverse proxy: Express req.ip / X-Forwarded-For (activity logs geo, rate limits, secure cookies)
     TRUST_PROXY_HOPS: Joi.number()
@@ -151,6 +169,13 @@ const envVarsSchema = Joi.object()
       .allow('')
       .description('HRM backend base URL (no trailing slash), e.g. https://hrm-api.example.com'),
     HRM_WEBRTC_TOKEN_EXPIRATION_MINUTES: Joi.number().integer().min(1).max(120).optional().default(15),
+
+    /** When true, login/refresh/impersonation responses include JWT strings in JSON (cookies always set). Default: on in non-production, off in production unless set true. */
+    AUTH_RETURN_TOKENS_IN_JSON: Joi.string().valid('true', 'false', '1', '0', '').optional().allow(null).empty(''),
+    /** When true, GET /v1/openapi.json is served in production (default false there). Always served in dev/test. */
+    EXPOSE_OPENAPI: Joi.string().valid('true', 'false', '1', '0', '').optional().allow(null).empty(''),
+    /** bcrypt salt rounds for password hashing (default 12). */
+    BCRYPT_SALT_ROUNDS: Joi.number().integer().min(8).max(20).optional().default(12),
   })
   .unknown();
 
@@ -208,13 +233,19 @@ const config = {
         pass: envVars.SMTP_PASSWORD,
       },
       tls: {
-        rejectUnauthorized: false,
+        rejectUnauthorized: !['false', '0'].includes(
+          String(envVars.SMTP_TLS_REJECT_UNAUTHORIZED ?? 'true')
+            .trim()
+            .toLowerCase()
+        ),
       },
     },
     from: envVars.EMAIL_FROM,
     replyTo: envVars.EMAIL_REPLY_TO,
   },
-  corsOrigin: envVars.CORS_ORIGIN ? envVars.CORS_ORIGIN.split(',').map((o) => o.trim()) : true,
+  corsOrigin: envVars.CORS_ORIGIN?.trim()
+    ? envVars.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+    : true,
   // Email/share links: use public URLs. In production set FRONTEND_BASE_URL and BACKEND_PUBLIC_URL.
   // Fallbacks: SITE_URL/APP_URL for frontend; RENDER_EXTERNAL_URL, VERCEL_URL, RAILWAY_PUBLIC_DOMAIN for backend.
   frontendBaseUrl: (
@@ -301,8 +332,14 @@ const config = {
   },
   rateLimit: {
     authWindowMinutes: envVars.RATE_LIMIT_AUTH_WINDOW_MINUTES ?? 15,
-    authMax: envVars.RATE_LIMIT_AUTH_MAX ?? 500,
+    authMax: envVars.RATE_LIMIT_AUTH_MAX ?? 80,
     jobsBrowsePerMinute: envVars.RATE_LIMIT_JOBS_BROWSE_PER_MINUTE ?? 120,
+    authStrictMax: envVars.RATE_LIMIT_AUTH_STRICT_MAX ?? 30,
+    authStrictWindowMinutes: envVars.RATE_LIMIT_AUTH_STRICT_WINDOW_MINUTES ?? 15,
+    publicRegistrationMax: envVars.RATE_LIMIT_PUBLIC_REGISTRATION_MAX ?? 45,
+    publicRegistrationWindowMinutes: envVars.RATE_LIMIT_PUBLIC_REGISTRATION_WINDOW_MINUTES ?? 60,
+    publicWriteMax: envVars.RATE_LIMIT_PUBLIC_WRITE_MAX ?? 120,
+    publicWriteWindowMinutes: envVars.RATE_LIMIT_PUBLIC_WRITE_WINDOW_MINUTES ?? 15,
   },
   /** Express `trust proxy` hop count; 0 leaves default (do not trust X-Forwarded-For). Takes precedence over `trustProxy`. */
   trustProxyHops: envVars.TRUST_PROXY_HOPS ?? 0,
@@ -348,6 +385,18 @@ const config = {
     signalingBaseUrl: (envVars.HRM_WEBRTC_SIGNALING_BASE_URL || '').trim().replace(/\/+$/, ''),
     tokenExpirationMinutes: envVars.HRM_WEBRTC_TOKEN_EXPIRATION_MINUTES ?? 15,
   },
+  webhooks: {
+    bolnaSecret: (envVars.BOLNA_WEBHOOK_SECRET || '').trim(),
+  },
+  auth: {
+    returnTokensInJson:
+      envVars.NODE_ENV !== 'production' ||
+      ['true', '1'].includes(String(envVars.AUTH_RETURN_TOKENS_IN_JSON || '').trim().toLowerCase()),
+  },
+  exposeOpenApi:
+    envVars.NODE_ENV !== 'production' ||
+    ['true', '1'].includes(String(envVars.EXPOSE_OPENAPI || '').trim().toLowerCase()),
+  bcryptSaltRounds: envVars.BCRYPT_SALT_ROUNDS ?? 12,
 };
 
 // Production: warn if email/share links would use localhost

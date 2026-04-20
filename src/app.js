@@ -10,9 +10,9 @@ import httpStatus from 'http-status';
 import config from './config/config.js';
 import * as morgan from './config/morgan.js';
 import { jwtStrategy } from './config/passport.js';
-import { authLimiter } from './middlewares/rateLimiter.js';
 import routes from './routes/v1/index.js';
 import { errorConverter, errorHandler } from './middlewares/error.js';
+import { verifyBolnaWebhook } from './middlewares/verifyWebhook.js';
 import ApiError from './utils/ApiError.js';
 import * as bolnaController from './controllers/bolna.controller.js';
 
@@ -27,16 +27,31 @@ if (config.trustProxyHops > 0) {
   app.set('trust proxy', true);
 }
 
+// Security headers first (before request logging / parsers)
+app.use(helmet());
+
 if (config.env !== 'test') {
   app.use(morgan.successHandler);
   app.use(morgan.errorHandler);
 }
 
-// set security HTTP headers
-app.use(helmet());
-
-// parse json request body (default ~100kb is too small for PM task-breakdown/apply with many long descriptions)
-app.use(express.json({ limit: process.env.JSON_BODY_LIMIT || '2mb' }));
+// JSON body: tight default to reduce DoS surface; larger limit only for heavy PM assistant routes.
+// Preserve raw bytes for webhook signature verification (LiveKit).
+const jsonBodyVerify = (req, res, buf) => {
+  req.rawBody = buf;
+};
+const defaultJsonLimit = process.env.JSON_BODY_LIMIT || '512kb';
+const heavyJsonLimit = process.env.JSON_BODY_LIMIT_HEAVY || '2mb';
+const heavyJsonPaths = /^\/v1\/pm-assistant(\/|$)/;
+const jsonParserDefault = express.json({ limit: defaultJsonLimit, verify: jsonBodyVerify });
+const jsonParserHeavy = express.json({ limit: heavyJsonLimit, verify: jsonBodyVerify });
+app.use((req, res, next) => {
+  const path = (req.originalUrl || req.url || '').split('?')[0];
+  if (heavyJsonPaths.test(path)) {
+    return jsonParserHeavy(req, res, next);
+  }
+  return jsonParserDefault(req, res, next);
+});
 
 // parse cookies (needed for auth from cookie)
 app.use(cookieParser());
@@ -76,7 +91,7 @@ const corsOptions = {
     if (!origin) return callback(null, true);
     
     if (config.corsOrigin === true) {
-      // Allow all origins in development
+      // CORS_ORIGIN unset: allow any browser origin (typical local dev only; production must set CORS_ORIGIN).
       return callback(null, true);
     }
     
@@ -99,7 +114,6 @@ const corsOptions = {
     'Idempotency-Key',
     'idempotency-key',
   ],
-  exposedHeaders: ['Authorization'],
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS', 'HEAD'],
 };
 
@@ -110,15 +124,14 @@ app.options('*', cors(corsOptions));
 app.use(passport.initialize());
 passport.use('jwt', jwtStrategy);
 
-// limit repeated failed requests to auth endpoints
-if (config.env === 'production') {
-  app.use('/v1/auth', authLimiter);
-}
-
 // health / root (for Render health checks and visiting the URL)
-app.post('/', bolnaController.receiveWebhook);
+app.post('/', verifyBolnaWebhook, bolnaController.receiveWebhook);
 app.get('/', (req, res) => {
-  res.status(httpStatus.OK).json({ status: 'ok', message: 'UAT Dharwin Backend API', docs: '/v1/docs' });
+  const payload = { status: 'ok', message: 'UAT Dharwin Backend API', openapi: '/v1/openapi.json' };
+  if (config.env === 'development') {
+    payload.docs = '/v1/docs';
+  }
+  res.status(httpStatus.OK).json(payload);
 });
 app.get('/health', (req, res) => {
   res.status(httpStatus.OK).json({ status: 'ok' });

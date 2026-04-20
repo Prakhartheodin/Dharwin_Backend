@@ -29,6 +29,7 @@ import externalJobRoute from './externalJob.route.js';
 import recruiterActivityRoute from './recruiterActivity.route.js';
 import recruiterExcelRoute from './recruiterExcel.route.js';
 import docsRoute from './docs.route.js';
+import openApiRoute from './openapi.route.js';
 import config from '../../config/config.js';
 import blogRoute from './blog.route.js';
 import livekitRoute from './livekit.route.js';
@@ -71,6 +72,10 @@ import hrmWebRtcRoute from './hrmWebRtc.route.js';
 const router = express.Router();
 
 const defaultRoutes = [
+  {
+    path: '/openapi.json',
+    route: openApiRoute,
+  },
   {
     path: '/auth',
     route: authRoute,

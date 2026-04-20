@@ -1,29 +1,41 @@
 import jwt from 'jsonwebtoken';
-import moment from 'moment';
 import httpStatus from 'http-status';
 import config from '../config/config.js';
-import {getUserByEmail} from './user.service.js';
+import { getUserByEmail } from './user.service.js';
 
 import ApiError from '../utils/ApiError.js';
 import { tokenTypes } from '../config/tokens.js';
 import Token from '../models/token.model.js';
 import { getClientIpFromRequest, parseClientSuppliedIpHeader } from '../utils/requestIp.util.js';
 
+const nowUnix = () => Math.floor(Date.now() / 1000);
+
+const addMinutes = (base, minutes) => {
+  const d = new Date(base);
+  d.setMinutes(d.getMinutes() + minutes);
+  return d;
+};
+
+const addDays = (base, days) => {
+  const d = new Date(base);
+  d.setDate(d.getDate() + days);
+  return d;
+};
 
 /**
- * Generate token
- * @param {ObjectId} userId
- * @param {Moment} expires
+ * @param {import('mongoose').Types.ObjectId|string} userId
+ * @param {Date} expiresAt
  * @param {string} type
  * @param {string} [secret]
- * @param {Object} [extraPayload] - optional extra fields (e.g. impersonation)
+ * @param {Object} [extraPayload]
  * @returns {string}
  */
-const generateToken = (userId, expires, type, secret = config.jwt.secret, extraPayload = {}) => {
+const generateToken = (userId, expiresAt, type, secret = config.jwt.secret, extraPayload = {}) => {
+  const exp = Math.floor(expiresAt.getTime() / 1000);
   const payload = {
     sub: userId,
-    iat: moment().unix(),
-    exp: expires.unix(),
+    iat: nowUnix(),
+    exp,
     type,
     ...extraPayload,
   };
@@ -31,20 +43,19 @@ const generateToken = (userId, expires, type, secret = config.jwt.secret, extraP
 };
 
 /**
- * Save a token
  * @param {string} token
- * @param {ObjectId} userId
- * @param {Moment} expires
+ * @param {import('mongoose').Types.ObjectId|string} userId
+ * @param {Date} expires
  * @param {string} type
  * @param {boolean} [blacklisted]
  * @param {{ userAgent?: string, ip?: string, clientIp?: string|null }} [options]
- * @returns {Promise<Token>}
  */
 const saveToken = async (token, userId, expires, type, blacklisted = false, options = {}) => {
+  const expiresDate = expires instanceof Date ? expires : new Date(expires);
   const tokenDoc = await Token.create({
     token,
     user: userId,
-    expires: expires.toDate(),
+    expires: expiresDate,
     type,
     blacklisted,
     userAgent: options.userAgent ?? null,
@@ -90,21 +101,21 @@ const getRequestSessionMeta = (req) => {
  */
 const generateAuthTokens = async (user, req = null) => {
   const { userAgent, ip, clientIp } = getRequestSessionMeta(req);
-  const accessTokenExpires = moment().add(config.jwt.accessExpirationMinutes, 'minutes');
+  const accessTokenExpires = addMinutes(new Date(), config.jwt.accessExpirationMinutes);
   const accessToken = generateToken(user.id, accessTokenExpires, tokenTypes.ACCESS);
 
-  const refreshTokenExpires = moment().add(config.jwt.refreshExpirationDays, 'days');
+  const refreshTokenExpires = addDays(new Date(), config.jwt.refreshExpirationDays);
   const refreshToken = generateToken(user.id, refreshTokenExpires, tokenTypes.REFRESH);
   await saveToken(refreshToken, user.id, refreshTokenExpires, tokenTypes.REFRESH, false, { userAgent, ip, clientIp });
 
   return {
     access: {
       token: accessToken,
-      expires: accessTokenExpires.toDate(),
+      expires: accessTokenExpires,
     },
     refresh: {
       token: refreshToken,
-      expires: refreshTokenExpires.toDate(),
+      expires: refreshTokenExpires,
     },
   };
 };
@@ -119,7 +130,7 @@ const generateResetPasswordToken = async (email) => {
   if (!user) {
     throw new ApiError(httpStatus.NOT_FOUND, 'No users found with this email');
   }
-  const expires = moment().add(config.jwt.resetPasswordExpirationMinutes, 'minutes');
+  const expires = addMinutes(new Date(), config.jwt.resetPasswordExpirationMinutes);
   const resetPasswordToken = generateToken(user.id, expires, tokenTypes.RESET_PASSWORD);
   await saveToken(resetPasswordToken, user.id, expires, tokenTypes.RESET_PASSWORD);
   return resetPasswordToken;
@@ -131,7 +142,7 @@ const generateResetPasswordToken = async (email) => {
  * @returns {Promise<string>}
  */
 const generateVerifyEmailToken = async (user) => {
-  const expires = moment().add(config.jwt.verifyEmailExpirationMinutes, 'minutes');
+  const expires = addMinutes(new Date(), config.jwt.verifyEmailExpirationMinutes);
   const verifyEmailToken = generateToken(user.id, expires, tokenTypes.VERIFY_EMAIL);
   await saveToken(verifyEmailToken, user.id, expires, tokenTypes.VERIFY_EMAIL);
   return verifyEmailToken;
@@ -139,8 +150,6 @@ const generateVerifyEmailToken = async (user) => {
 
 /**
  * Generate tokens for impersonation session.
- * Access and refresh tokens carry impersonation payload so the user is the impersonated user
- * and we know who initiated and can restore admin on stop.
  * @param {User} impersonatedUser
  * @param {string} impersonationId - Impersonation document id
  * @param {string} adminUserId
@@ -157,7 +166,7 @@ const generateImpersonationTokens = async (impersonatedUser, impersonationId, ad
       startedAt: startedAt ? new Date(startedAt).toISOString() : undefined,
     },
   };
-  const accessTokenExpires = moment().add(config.jwt.accessExpirationMinutes, 'minutes');
+  const accessTokenExpires = addMinutes(new Date(), config.jwt.accessExpirationMinutes);
   const accessToken = generateToken(
     impersonatedUser.id,
     accessTokenExpires,
@@ -166,7 +175,7 @@ const generateImpersonationTokens = async (impersonatedUser, impersonationId, ad
     impersonationPayload
   );
 
-  const refreshTokenExpires = moment().add(config.jwt.refreshExpirationDays, 'days');
+  const refreshTokenExpires = addDays(new Date(), config.jwt.refreshExpirationDays);
   const refreshToken = generateToken(
     impersonatedUser.id,
     refreshTokenExpires,
@@ -183,11 +192,11 @@ const generateImpersonationTokens = async (impersonatedUser, impersonationId, ad
   return {
     access: {
       token: accessToken,
-      expires: accessTokenExpires.toDate(),
+      expires: accessTokenExpires,
     },
     refresh: {
       token: refreshToken,
-      expires: refreshTokenExpires.toDate(),
+      expires: refreshTokenExpires,
     },
   };
 };
@@ -225,4 +234,3 @@ export {
   generateVerifyEmailToken,
   getSessionsForUser,
 };
-

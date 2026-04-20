@@ -320,6 +320,9 @@ const mapExperienceLevel = (years) => {
   return 'Executive';
 };
 
+/** Escape user input for safe use inside MongoDB `$regex` literals (ReDoS / metachar injection). */
+const escapeRegex = (value) => String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 /**
  * Build MongoDB query for advanced filtering
  */
@@ -330,10 +333,10 @@ const buildAdvancedFilter = (filter) => {
   // Basic filters
   if (filter.owner) mongoFilter.owner = filter.owner;
   if (filter.fullName) {
-    mongoFilter.fullName = { $regex: filter.fullName, $options: 'i' };
+    mongoFilter.fullName = { $regex: escapeRegex(filter.fullName), $options: 'i' };
   }
   if (filter.email) {
-    mongoFilter.email = { $regex: filter.email, $options: 'i' };
+    mongoFilter.email = { $regex: escapeRegex(filter.email), $options: 'i' };
   }
   if (filter.employeeId) {
     const trimmed = String(filter.employeeId).trim();
@@ -370,26 +373,27 @@ const buildAdvancedFilter = (filter) => {
   
   // Location matching (can match city, state, or country)
   if (filter.location) {
+    const loc = escapeRegex(filter.location);
     orConditions.push(
-      { 'address.city': { $regex: filter.location, $options: 'i' } },
-      { 'address.state': { $regex: filter.location, $options: 'i' } },
-      { 'address.country': { $regex: filter.location, $options: 'i' } }
+      { 'address.city': { $regex: loc, $options: 'i' } },
+      { 'address.state': { $regex: loc, $options: 'i' } },
+      { 'address.country': { $regex: loc, $options: 'i' } }
     );
   }
   
   // City matching
   if (filter.city) {
-    mongoFilter['address.city'] = { $regex: filter.city, $options: 'i' };
+    mongoFilter['address.city'] = { $regex: escapeRegex(filter.city), $options: 'i' };
   }
   
   // State matching
   if (filter.state) {
-    mongoFilter['address.state'] = { $regex: filter.state, $options: 'i' };
+    mongoFilter['address.state'] = { $regex: escapeRegex(filter.state), $options: 'i' };
   }
   
   // Country matching
   if (filter.country) {
-    mongoFilter['address.country'] = { $regex: filter.country, $options: 'i' };
+    mongoFilter['address.country'] = { $regex: escapeRegex(filter.country), $options: 'i' };
   }
   
   // Degree matching - frontend sends "Degree - Institute" (e.g. "Masters - Southern Arkansas University")
@@ -419,9 +423,10 @@ const buildAdvancedFilter = (filter) => {
   
   // Visa type matching
   if (filter.visaType) {
+    const vt = escapeRegex(filter.visaType);
     orConditions.push(
-      { visaType: { $regex: filter.visaType, $options: 'i' } },
-      { customVisaType: { $regex: filter.visaType, $options: 'i' } }
+      { visaType: { $regex: vt, $options: 'i' } },
+      { customVisaType: { $regex: vt, $options: 'i' } }
     );
   }
 

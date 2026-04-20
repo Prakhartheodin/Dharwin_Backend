@@ -5,6 +5,7 @@ import StudentCourseProgress from '../models/studentCourseProgress.model.js';
 import TrainingModule from '../models/trainingModule.model.js';
 import Student from '../models/student.model.js';
 import StudentQuizAttempt from '../models/studentQuizAttempt.model.js';
+import logger from '../config/logger.js';
 
 /**
  * Generate certificate for student course completion
@@ -204,7 +205,7 @@ const autoGenerateCertificateIfEligible = async (studentId, moduleId) => {
     return await generateCertificate(studentId, moduleId);
   } catch (error) {
     // Silently fail - certificate generation shouldn't break the main flow
-    console.error('Auto-generate certificate error:', error);
+    logger.error('Auto-generate certificate error:', error);
     return null;
   }
 };

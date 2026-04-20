@@ -6,29 +6,48 @@ import * as authController from '../../controllers/auth.controller.js';
 import auth from '../../middlewares/auth.js';
 import optionalAuth from '../../middlewares/optionalAuth.js';
 import requireAdministratorRole from '../../middlewares/requireAdministratorRole.js';
+import { authLoginLimiter, authStrictFlowLimiter } from '../../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
-router.post('/register', optionalAuth(), validate(authValidation.register), authController.register);
-router.post('/register-student', optionalAuth(), validate(authValidation.registerStudent), authController.registerStudent);
-router.post('/register-mentor', optionalAuth(), validate(authValidation.registerMentor), authController.registerMentor);
+router.post(
+  '/register',
+  authStrictFlowLimiter,
+  optionalAuth(),
+  validate(authValidation.register),
+  authController.register
+);
+router.post(
+  '/register-student',
+  authStrictFlowLimiter,
+  optionalAuth(),
+  validate(authValidation.registerStudent),
+  authController.registerStudent
+);
+router.post(
+  '/register-mentor',
+  authStrictFlowLimiter,
+  optionalAuth(),
+  validate(authValidation.registerMentor),
+  authController.registerMentor
+);
 router.post('/register-recruiter', auth(), requireAdministratorRole(), validate(authValidation.registerRecruiter), authController.registerRecruiter);
-router.post('/login', validate(authValidation.login), authController.login);
+router.post('/login', authLoginLimiter, validate(authValidation.login), authController.login);
 router.post('/logout', validate(authValidation.logout), authController.logout);
 router.post('/refresh-tokens', validate(authValidation.refreshTokens), authController.refreshTokens);
 router.get('/me', auth(), authController.getMe);
 router.patch('/me', auth(), validate(authValidation.updateMe), authController.updateMe);
 router.get('/me/with-candidate', auth(), authController.getMeWithCandidate);
 router.patch('/me/with-candidate', auth(), validate(authValidation.updateMeWithCandidate), authController.updateMeWithCandidate);
-router.post('/me/send-verification-email', auth(), authController.sendMyVerificationEmail);
+router.post('/me/send-verification-email', auth(), authStrictFlowLimiter, authController.sendMyVerificationEmail);
 router.get('/my-permissions', auth(), authController.getMyPermissions);
 router.post('/impersonate', auth(), requireAdministratorRole(), validate(authValidation.impersonate), authController.impersonate);
 router.post('/stop-impersonation', auth(), authController.stopImpersonation);
-router.post('/forgot-password', validate(authValidation.forgotPassword), authController.forgotPassword);
-router.post('/reset-password', validate(authValidation.resetPassword), authController.resetPassword);
+router.post('/forgot-password', authStrictFlowLimiter, validate(authValidation.forgotPassword), authController.forgotPassword);
+router.post('/reset-password', authStrictFlowLimiter, validate(authValidation.resetPassword), authController.resetPassword);
 router.post('/change-password', auth(), validate(authValidation.changePassword), authController.changePassword);
 router.post('/send-verification-email', auth(), requirePermissions('users.manage'), authController.sendVerificationEmail);
-router.post('/verify-email', validate(authValidation.verifyEmail), authController.verifyEmail);
+router.post('/verify-email', authStrictFlowLimiter, validate(authValidation.verifyEmail), authController.verifyEmail);
 router.post('/send-candidate-invitation', auth(), requirePermissions('share-candidate-form.read'), validate(authValidation.sendCandidateInvitation), authController.sendCandidateInvitation);
 
 export default router;

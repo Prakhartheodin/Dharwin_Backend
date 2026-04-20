@@ -1,6 +1,7 @@
 import mongoose from 'mongoose';
 import validator from 'validator';
 import bcrypt from 'bcryptjs';
+import config from '../config/config.js';
 // import { toJSON, paginate } from './plugins.js';
 import toJSON from './plugins/toJSON.plugin.js';
 import paginate from './plugins/paginate.plugin.js';
@@ -152,7 +153,7 @@ userSchema.pre('save', async function (next) {
     user.username = user.email;
   }
   if (user.isModified('password')) {
-    user.password = await bcrypt.hash(user.password, 8);
+    user.password = await bcrypt.hash(user.password, config.bcryptSaltRounds);
   }
   // Normalize domain: ensure array of strings (backward compat with string)
   if (user.domain != null) {

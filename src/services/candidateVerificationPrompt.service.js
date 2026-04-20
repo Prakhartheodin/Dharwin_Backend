@@ -95,7 +95,23 @@ export async function buildCandidateVerificationPromptContext({
 
   promptContext.candidate_email_spoken = emailToSpokenForm(promptContext.candidate_email);
 
-  const otherJobs = await Job.find({ status: 'Active', _id: { $ne: job._id } }).limit(10).lean();
+  const orgName = (job.organisation?.name || '').trim();
+  let otherJobs = [];
+  if (orgName) {
+    const otherQuery = {
+      status: 'Active',
+      _id: { $ne: job._id },
+      'organisation.name': orgName,
+    };
+    const orgSite = (job.organisation?.website || '').trim();
+    const orgEmail = (job.organisation?.email || '').trim();
+    if (orgSite) {
+      otherQuery['organisation.website'] = orgSite;
+    } else if (orgEmail) {
+      otherQuery['organisation.email'] = orgEmail;
+    }
+    otherJobs = await Job.find(otherQuery).limit(10).lean();
+  }
 
   const otherJobsList = otherJobs.map((j) => ({
     title: j.title,

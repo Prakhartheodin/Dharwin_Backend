@@ -9,6 +9,7 @@ import * as meetingController from '../../controllers/meeting.controller.js';
 import * as jobValidation from '../../validations/job.validation.js';
 import * as jobController from '../../controllers/job.controller.js';
 import { uploadJobApplicationFiles } from '../../middlewares/upload.js';
+import { publicRegistrationLimiter, publicWriteLimiter } from '../../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
@@ -18,20 +19,25 @@ const router = express.Router();
  * User cannot login or access the system until an administrator sets status to 'active'.
  * No tokens or cookies are issued.
  */
-router.post('/register', validate(authValidation.register), authController.publicRegister);
+router.post('/register', publicRegistrationLimiter, validate(authValidation.register), authController.publicRegister);
 
 /**
  * POST /v1/public/register-candidate
  * Public candidate onboarding (no auth). Creates user with status 'pending' and a Candidate
  * linked to that user so they appear in the ATS candidate list.
  */
-router.post('/register-candidate', validate(authValidation.registerCandidate), authController.publicRegisterCandidate);
+router.post(
+  '/register-candidate',
+  publicRegistrationLimiter,
+  validate(authValidation.registerCandidate),
+  authController.publicRegisterCandidate
+);
 
 /**
  * POST /v1/public/livekit-token
  * Public LiveKit token (no auth). Body: { roomName, participantName }
  */
-router.post('/livekit-token', validate(livekitValidation.getToken), livekitController.getTokenPublic);
+router.post('/livekit-token', publicWriteLimiter, validate(livekitValidation.getToken), livekitController.getTokenPublic);
 
 /**
  * GET /v1/public/waiting-participants/:roomName
@@ -51,7 +57,8 @@ router.get(
  */
 router.post(
   '/admit-participant',
-  validate(livekitValidation.admitParticipant),
+  publicWriteLimiter,
+  validate(livekitValidation.admitParticipantPublic),
   livekitController.admitParticipantPublic
 );
 
@@ -62,7 +69,8 @@ router.post(
  */
 router.post(
   '/remove-participant',
-  validate(livekitValidation.removeParticipant),
+  publicWriteLimiter,
+  validate(livekitValidation.removeParticipantPublic),
   livekitController.removeParticipantPublic
 );
 
@@ -72,6 +80,7 @@ router.post(
  */
 router.post(
   '/recording/start',
+  publicWriteLimiter,
   validate(livekitValidation.startRecordingPublic),
   livekitController.startRecordingPublic
 );
@@ -82,6 +91,7 @@ router.post(
  */
 router.post(
   '/recording/stop',
+  publicWriteLimiter,
   validate(livekitValidation.stopRecordingPublic),
   livekitController.stopRecordingPublic
 );
@@ -102,6 +112,7 @@ router.get(
  */
 router.post(
   '/meetings/end',
+  publicWriteLimiter,
   validate(meetingValidation.endMeetingByRoomPublic),
   meetingController.endMeetingByRoomPublic
 );
@@ -125,6 +136,7 @@ router.get('/jobs/:jobId', validate(jobValidation.getPublicJob), jobController.g
  */
 router.post(
   '/jobs/:jobId/apply',
+  publicRegistrationLimiter,
   uploadJobApplicationFiles,
   validate(jobValidation.publicApplyToJob),
   jobController.publicApplyToJob

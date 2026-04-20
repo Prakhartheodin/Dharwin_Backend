@@ -5,10 +5,9 @@ import requirePermissions from '../../middlewares/requirePermissions.js';
 import requireStudentsReadOrOwnStudent from '../../middlewares/requireStudentsReadOrOwnStudent.js';
 import * as studentValidation from '../../validations/student.validation.js';
 import * as studentController from '../../controllers/student.controller.js';
-import multer from 'multer';
+import { studentProfileImageUpload } from '../../middlewares/upload.js';
 
 const router = express.Router();
-const upload = multer({ storage: multer.memoryStorage() });
 
 router
   .route('/')
@@ -71,7 +70,7 @@ router
   .post(
     auth(),
     requirePermissions('students.manage'),
-    upload.single('file'),
+    studentProfileImageUpload.single('file'),
     studentController.uploadProfileImage
   )
   .get(auth(), requirePermissions('students.read'), studentController.getProfileImage);

@@ -77,6 +77,25 @@ const removeParticipant = {
   }),
 };
 
+/** Public (no auth) admit/remove — host must be proven via email (same as recording/start). */
+const admitParticipantPublic = {
+  body: Joi.object().keys({
+    roomName: Joi.string().required().trim(),
+    participantIdentity: Joi.string().required().trim(),
+    participantName: Joi.string().optional().trim(),
+    participantEmail: Joi.string().optional().email().trim(),
+    hostEmail: Joi.string().required().email().trim(),
+  }),
+};
+
+const removeParticipantPublic = {
+  body: Joi.object().keys({
+    roomName: Joi.string().required().trim(),
+    participantIdentity: Joi.string().required().trim(),
+    hostEmail: Joi.string().required().email().trim(),
+  }),
+};
+
 export {
   getToken,
   startRecording,
@@ -88,4 +107,6 @@ export {
   getWaitingParticipants,
   admitParticipant,
   removeParticipant,
+  admitParticipantPublic,
+  removeParticipantPublic,
 };

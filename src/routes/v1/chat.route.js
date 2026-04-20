@@ -3,14 +3,11 @@ import multer from 'multer';
 import auth from '../../middlewares/auth.js';
 import validate from '../../middlewares/validate.js';
 import requirePermissions from '../../middlewares/requirePermissions.js';
+import { chatAttachmentsUpload } from '../../middlewares/upload.js';
 import * as chatValidation from '../../validations/chat.validation.js';
 import * as chatController from '../../controllers/chat.controller.js';
 
 const router = express.Router();
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 25 * 1024 * 1024 },
-});
 
 const groupAvatarUpload = multer({
   storage: multer.memoryStorage(),
@@ -85,7 +82,7 @@ router.post(
 router.post(
   '/conversations/:id/messages/upload',
   validate(chatValidation.conversationIdParam),
-  upload.array('files', 10),
+  chatAttachmentsUpload.array('files', 10),
   chatController.uploadAndSendMessage
 );
 router.patch(

@@ -192,6 +192,15 @@ const admitParticipant = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'roomName and participantIdentity are required');
   }
 
+  const hostEmail = req.user?.email;
+  if (!hostEmail) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Authenticated user email required to admit participants');
+  }
+  const isHost = await livekitService.isParticipantHost(roomName, hostEmail);
+  if (!isHost) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only hosts can admit participants');
+  }
+
   // Generate new token with full permissions for the participant
   const result = await livekitService.admitParticipant(
     roomName, 
@@ -217,6 +226,15 @@ const removeParticipant = catchAsync(async (req, res) => {
 
   if (!roomName || !participantIdentity) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'roomName and participantIdentity are required');
+  }
+
+  const hostEmail = req.user?.email;
+  if (!hostEmail) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Authenticated user email required to remove participants');
+  }
+  const isHost = await livekitService.isParticipantHost(roomName, hostEmail);
+  if (!isHost) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only hosts can remove participants');
   }
 
   const result = await livekitService.removeParticipant(roomName, participantIdentity);
@@ -263,12 +281,12 @@ const admitParticipantPublic = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'roomName and participantIdentity are required');
   }
 
-  // Verify host status if email is provided
-  if (hostEmail) {
-    const isHost = await livekitService.isParticipantHost(roomName, hostEmail);
-    if (!isHost) {
-      throw new ApiError(httpStatus.FORBIDDEN, 'Only hosts can admit participants');
-    }
+  if (!hostEmail) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'hostEmail is required');
+  }
+  const isHost = await livekitService.isParticipantHost(roomName, hostEmail);
+  if (!isHost) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only hosts can admit participants');
   }
 
   const result = await livekitService.admitParticipant(
@@ -297,12 +315,12 @@ const removeParticipantPublic = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'roomName and participantIdentity are required');
   }
 
-  // Verify host status if email is provided
-  if (hostEmail) {
-    const isHost = await livekitService.isParticipantHost(roomName, hostEmail);
-    if (!isHost) {
-      throw new ApiError(httpStatus.FORBIDDEN, 'Only hosts can remove participants');
-    }
+  if (!hostEmail) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'hostEmail is required');
+  }
+  const isHost = await livekitService.isParticipantHost(roomName, hostEmail);
+  if (!isHost) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Only hosts can remove participants');
   }
 
   const result = await livekitService.removeParticipant(roomName, participantIdentity);

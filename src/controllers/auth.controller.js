@@ -43,6 +43,14 @@ const setAuthCookies = (res, tokens) => {
   res.cookie(REFRESH_TOKEN_COOKIE, tokens.refresh.token, cookieOptions(tokens.refresh.expires));
 };
 
+/** When false (default in production), JSON bodies omit token strings; HttpOnly cookies remain. */
+const includeAuthTokensInJson = () => Boolean(config.auth?.returnTokensInJson);
+
+const withOptionalTokens = (payload, tokens) => {
+  if (!includeAuthTokensInJson()) return payload;
+  return { ...payload, tokens };
+};
+
 const clearAuthCookies = (res) => {
   const options = cookieOptions();
   res.clearCookie(ACCESS_TOKEN_COOKIE, options);
@@ -170,7 +178,12 @@ const register = catchAsync(async (req, res) => {
  * No tokens or cookies are issued.
  */
 const publicRegister = catchAsync(async (req, res) => {
-  const user = await createUser({ ...req.body, status: 'pending' });
+  const body = { ...req.body, status: 'pending' };
+  delete body.roleIds;
+  delete body.isEmailVerified;
+  delete body.platformSuperUser;
+  delete body.hideFromDirectory;
+  const user = await createUser(body);
   res.status(httpStatus.CREATED).send({
     user,
     message: 'Registration successful. Your account is pending administrator approval. You will be able to sign in once activated.',
@@ -294,7 +307,7 @@ const registerStudent = catchAsync(async (req, res) => {
   if (!isAdminRegistration) {
     const tokens = await generateAuthTokens(user, req);
     setAuthCookies(res, tokens);
-    res.status(httpStatus.CREATED).send({ user, student, tokens });
+    res.status(httpStatus.CREATED).send(withOptionalTokens({ user, student }, tokens));
   } else {
     // Admin registration: no tokens, just return user and student
     res.status(httpStatus.CREATED).send({ user, student });
@@ -328,7 +341,7 @@ const registerMentor = catchAsync(async (req, res) => {
   if (!isAdminRegistration) {
     const tokens = await generateAuthTokens(user, req);
     setAuthCookies(res, tokens);
-    res.status(httpStatus.CREATED).send({ user, mentor, tokens });
+    res.status(httpStatus.CREATED).send(withOptionalTokens({ user, mentor }, tokens));
   } else {
     // Admin registration: no tokens, just return user and mentor
     res.status(httpStatus.CREATED).send({ user, mentor });
@@ -364,7 +377,7 @@ const login = catchAsync(async (req, res) => {
     req
   );
   const userObj = await enrichUserWithFreshProfilePictureUrl(user);
-  res.send({ user: userObj, tokens });
+  res.send(withOptionalTokens({ user: userObj }, tokens));
 });
 
 const logout = catchAsync(async (req, res) => {
@@ -393,7 +406,11 @@ const refreshTokens = catchAsync(async (req, res) => {
   }
   const tokens = await refreshAuth(refreshToken, req);
   setAuthCookies(res, tokens);
-  res.send({ ...tokens });
+  if (includeAuthTokensInJson()) {
+    res.send({ ...tokens });
+  } else {
+    res.status(httpStatus.NO_CONTENT).send();
+  }
 });
 
 const forgotPassword = catchAsync(async (req, res) => {
@@ -651,11 +668,15 @@ const impersonate = catchAsync(async (req, res) => {
     req
   );
   setAuthCookies(res, result.tokens);
-  res.status(httpStatus.OK).send({
-    user: result.user,
-    tokens: result.tokens,
-    impersonation: result.impersonation,
-  });
+  res.status(httpStatus.OK).send(
+    withOptionalTokens(
+      {
+        user: result.user,
+        impersonation: result.impersonation,
+      },
+      result.tokens
+    )
+  );
 });
 
 /**
@@ -681,7 +702,7 @@ const stopImpersonation = catchAsync(async (req, res) => {
     req
   );
   setAuthCookies(res, result.tokens);
-  res.send({ user: result.user, tokens: result.tokens });
+  res.send(withOptionalTokens({ user: result.user }, result.tokens));
 });
 
 export {

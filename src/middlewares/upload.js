@@ -147,4 +147,43 @@ const uploadImagesVideos = (fieldName = 'attachments', maxCount = 10) => (req, r
   });
 };
 
-export { uploadSingle, uploadJobApplicationFiles, uploadImagesVideos };
+const studentProfileImageFilter = (req, file, cb) => {
+  const ok = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.mimetype);
+  cb(
+    ok ? null : new ApiError(httpStatus.BAD_REQUEST, 'Only JPEG, PNG, WebP, and GIF images are allowed for profile photos'),
+    ok
+  );
+};
+
+/** Student profile image: strict image types, 5MB max */
+const studentProfileImageUpload = multer({
+  storage,
+  fileFilter: studentProfileImageFilter,
+  limits: { fileSize: 5 * 1024 * 1024 },
+});
+
+const chatAttachmentFileFilter = (req, file, cb) => {
+  const mime = file.mimetype || '';
+  const ok =
+    mime.startsWith('image/') ||
+    mime.startsWith('audio/') ||
+    [
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/plain',
+    ].includes(mime);
+  cb(
+    ok ? null : new ApiError(httpStatus.BAD_REQUEST, `File type ${mime || 'unknown'} is not allowed for chat uploads`),
+    ok
+  );
+};
+
+/** Chat message attachments: images, audio, PDF/DOC/DOCX/txt; 25MB per file */
+const chatAttachmentsUpload = multer({
+  storage,
+  fileFilter: chatAttachmentFileFilter,
+  limits: { fileSize: 25 * 1024 * 1024 },
+});
+
+export { uploadSingle, uploadJobApplicationFiles, uploadImagesVideos, studentProfileImageUpload, chatAttachmentsUpload };

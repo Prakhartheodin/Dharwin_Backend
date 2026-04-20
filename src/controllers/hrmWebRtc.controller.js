@@ -1,6 +1,5 @@
 import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
-import moment from 'moment';
 import httpStatus from 'http-status';
 import catchAsync from '../utils/catchAsync.js';
 import ApiError from '../utils/ApiError.js';
@@ -25,7 +24,8 @@ const getSignalingToken = catchAsync(async (req, res) => {
   const { jwtSecret, jwtIssuer, jwtAudience } = requireHrmConfig();
   const { signalingBaseUrl, tokenExpirationMinutes } = config.hrmWebRtc;
 
-  const expires = moment().add(tokenExpirationMinutes, 'minutes');
+  const expires = new Date();
+  expires.setMinutes(expires.getMinutes() + tokenExpirationMinutes);
   const token = jwt.sign(
     {
       sub: String(req.user.id),
@@ -55,7 +55,8 @@ const createDeviceToken = catchAsync(async (req, res) => {
   const { deviceId, label, expirationDays = 365 } = req.body;
 
   const jti = crypto.randomUUID();
-  const expiresAt = moment().add(expirationDays, 'days');
+  const expiresAt = new Date();
+  expiresAt.setDate(expiresAt.getDate() + expirationDays);
 
   const token = jwt.sign(
     {
@@ -75,7 +76,7 @@ const createDeviceToken = catchAsync(async (req, res) => {
     deviceId,
     tokenJti: jti,
     issuedBy: req.user.id,
-    expiresAt: expiresAt.toDate(),
+    expiresAt,
     label: label || '',
   });
 

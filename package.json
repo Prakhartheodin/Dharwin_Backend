@@ -6,12 +6,13 @@
   "main": "src/index.js",
   "author": "Akshay Pareek",
   "engines": {
-    "node": ">=12.0.0"
+    "node": ">=18.0.0"
   },
   "scripts": {
     "start": "node src/index.js",
     "dev": "cross-env NODE_ENV=development nodemon src/index.js",
     "test": "node --test ./src/services/emailConnectionPolicy.service.test.js",
+    "audit:ci": "npm audit --audit-level=high",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "prettier": "prettier --check **/*.js",
@@ -23,7 +24,9 @@
     "docker:livekit:down": "docker compose -f docker-compose.livekit-local.yml down",
     "docker:livekit:full": "docker compose -f livekit/docker-compose.yml up -d",
     "docker:livekit:full:down": "docker compose -f livekit/docker-compose.yml down",
-    "fix:attendance-tz": "echo \"Removed: scripts/ folder was deleted\" && exit 1"
+    "fix:attendance-tz": "echo \"Removed: scripts/ folder was deleted\" && exit 1",
+    "mongo:copy-atlas-to-local": "node scripts/copy-mongo-atlas-to-local.mjs",
+    "mongo:verify-migration": "node scripts/verify-mongo-migration.mjs"
   },
   "keywords": [
     "node",
@@ -47,8 +50,8 @@
     "prettier"
   ],
   "dependencies": {
-    "@aws-sdk/client-s3": "^3.744.0",
-    "@aws-sdk/s3-request-presigner": "^3.744.0",
+    "@aws-sdk/client-s3": "^3.1031.0",
+    "@aws-sdk/s3-request-presigner": "^3.1031.0",
     "@azure/msal-node": "^5.1.0",
     "@microsoft/microsoft-graph-client": "^3.0.7",
     "bcryptjs": "^2.4.3",
@@ -64,14 +67,13 @@
     "geoip-lite": "^1.4.10",
     "googleapis": "^171.4.0",
     "gpt-tokenizer": "^3.4.0",
-    "helmet": "^4.1.0",
+    "helmet": "^7.1.0",
     "http-status": "^1.4.0",
     "joi": "^17.3.0",
-    "jsonwebtoken": "^8.5.1",
+    "jsonwebtoken": "^9.0.2",
     "jszip": "^3.10.1",
     "livekit-server-sdk": "^2.15.0",
     "mammoth": "^1.11.0",
-    "moment": "^2.24.0",
     "mongodb": "^6.21.0",
     "mongoose": "^8.0.0",
     "morgan": "^1.9.1",
@@ -81,7 +83,7 @@
     "passport": "^0.4.0",
     "passport-jwt": "^4.0.0",
     "pdf-parse": "^2.4.5",
-    "pm2": "^5.1.0",
+    "pm2": "^6.0.14",
     "socket.io": "^4.7.0",
     "swagger-jsdoc": "^6.0.8",
     "swagger-ui-express": "^4.1.6",
@@ -89,6 +91,9 @@
     "winston": "^3.2.1",
     "xlsx": "^0.18.5",
     "xss-clean": "^0.1.4"
+  },
+  "overrides": {
+    "basic-ftp": "5.3.0"
   },
   "devDependencies": {
     "@types/dotenv": "^6.1.1",

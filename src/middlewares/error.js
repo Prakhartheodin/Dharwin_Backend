@@ -9,7 +9,8 @@ const errorConverter = (err, req, res, next) => {
   let error = err;
   if (!(error instanceof ApiError)) {
     const statusCode =
-      error.statusCode || error instanceof mongoose.Error ? httpStatus.BAD_REQUEST : httpStatus.INTERNAL_SERVER_ERROR;
+      error.statusCode ??
+      (error instanceof mongoose.Error ? httpStatus.BAD_REQUEST : httpStatus.INTERNAL_SERVER_ERROR);
     const message = error.message || httpStatus[statusCode];
     error = new ApiError(statusCode, message, false, err.stack);
   }
@@ -24,14 +25,16 @@ const errorHandler = (err, req, res, next) => {
     message = httpStatus[httpStatus.INTERNAL_SERVER_ERROR];
   }
 
-  res.locals.errorMessage = err.message;
+  // Morgan logs :message from res.locals — avoid leaking raw internal errors in production access logs.
+  res.locals.errorMessage =
+    config.env === 'production' && !err.isOperational ? `HTTP ${statusCode}` : err.message;
 
   const response = {
     code: statusCode,
     message,
     ...(err.subCode && { error: err.subCode }),
     ...(err.errorCode && { errorCode: err.errorCode }),
-    ...(err.details && { details: err.details }),
+    ...((config.env === 'development' || err.isOperational) && err.details && { details: err.details }),
     ...(config.env === 'development' && { stack: err.stack }),
   };
 

@@ -764,27 +764,27 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
 
     try {
       candidate = await Candidate.create(candidateData);
-      console.log('✅ New candidate created:', { _id: candidate._id, fullName: candidate.fullName, email: candidate.email });
+      logger.info('✅ New candidate created:', { _id: candidate._id, fullName: candidate.fullName, email: candidate.email });
     } catch (createErr) {
       if (createErr.code === 11000) {
         candidate = await Candidate.findOne({ email: emailNormalized });
       }
       if (!candidate) throw createErr;
-      console.log('✅ Existing candidate reused after duplicate-key race:', {
+      logger.info('✅ Existing candidate reused after duplicate-key race:', {
         _id: candidate._id,
         fullName: candidate.fullName,
         email: candidate.email,
       });
     }
   } else {
-    console.log('✅ Existing candidate found:', { _id: candidate._id, fullName: candidate.fullName, email: candidate.email });
+    logger.info('✅ Existing candidate found:', { _id: candidate._id, fullName: candidate.fullName, email: candidate.email });
     
     // Update phone number if it changed
     if (candidate.phoneNumber !== phoneNumber || candidate.countryCode !== countryCode) {
       candidate.phoneNumber = phoneNumber;
       candidate.countryCode = countryCode;
       await candidate.save();
-      console.log('✅ Candidate phone updated');
+      logger.info('✅ Candidate phone updated');
     }
     
     // Add new documents if provided
@@ -795,7 +795,7 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
       
       candidate.documents = [...(candidate.documents || []), ...newDocs];
       await candidate.save();
-      console.log('✅ Candidate documents updated');
+      logger.info('✅ Candidate documents updated');
     }
   }
 
@@ -807,13 +807,13 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
     status: 'Applied',
     coverLetter: coverLetter || '',
   });
-  console.log('✅ Job application created:', { _id: application._id, candidate: application.candidate, job: application.job });
+  logger.info('✅ Job application created:', { _id: application._id, candidate: application.candidate, job: application.job });
 
   await application.populate([
     { path: 'candidate', select: 'fullName email phoneNumber' },
     { path: 'job', select: 'title organisation' },
   ]);
-  console.log('✅ Job application populated:', { 
+  logger.info('✅ Job application populated:', { 
     _id: application._id, 
     candidateData: application.candidate ? { 
       _id: application.candidate._id, 
@@ -840,7 +840,7 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
     loginUrl,
     resetPasswordUrl,
   }).catch((err) => {
-    console.error('Failed to send welcome email:', err);
+    logger.error('Failed to send welcome email:', err);
     // Don't fail the application if email fails
   });
 
@@ -849,11 +849,11 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
     try {
       const { initiateCandidateVerificationCall } = await import('./bolnaCandidateVerification.service.js');
 
-      console.log(`Processing phone for ${fullName}: Raw="${phoneNumber}", Country="${countryCode}"`);
+      logger.info(`Processing phone for ${fullName}: Raw="${phoneNumber}", Country="${countryCode}"`);
 
       let formattedPhone = String(phoneNumber).replace(/\D/g, '');
 
-      console.log(`After digit extraction: "${formattedPhone}"`);
+      logger.info(`After digit extraction: "${formattedPhone}"`);
 
       if (
         !formattedPhone.startsWith('91') &&
@@ -872,20 +872,20 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
                   ? '61'
                   : '1';
         formattedPhone = countryPrefix + formattedPhone;
-        console.log(`Added country prefix: "${formattedPhone}"`);
+        logger.info(`Added country prefix: "${formattedPhone}"`);
       }
 
       formattedPhone = '+' + formattedPhone;
 
-      console.log(`Final formatted phone: "${formattedPhone}" (length: ${formattedPhone.length})`);
+      logger.info(`Final formatted phone: "${formattedPhone}" (length: ${formattedPhone.length})`);
 
       const digitsOnly = formattedPhone.replace(/\D/g, '');
       if (digitsOnly.length < 10 || digitsOnly.length > 15) {
-        console.warn(`⚠️ Invalid phone number format for ${fullName}: ${formattedPhone} (digits: ${digitsOnly.length})`);
+        logger.warn(`⚠️ Invalid phone number format for ${fullName}: ${formattedPhone} (digits: ${digitsOnly.length})`);
       } else {
         const fullCandidate = await Candidate.findById(candidate._id);
         if (!fullCandidate) {
-          console.warn(`⚠️ Candidate not found for Bolna call: ${candidate._id}`);
+          logger.warn(`⚠️ Candidate not found for Bolna call: ${candidate._id}`);
         } else {
           initiateCandidateVerificationCall({
             agentId: config.bolna.candidateAgentId,
@@ -906,7 +906,7 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
                     },
                   }
                 ).catch((err) => {
-                  console.error('Failed to update application with call details:', err);
+                  logger.error('Failed to update application with call details:', err);
                 });
 
                 callRecordService
@@ -922,23 +922,23 @@ const publicApplyToJobService = async (jobId, applicationData, files) => {
                     status: 'initiated',
                   })
                   .catch((err) => {
-                    console.error('Failed to create call record:', err);
+                    logger.error('Failed to create call record:', err);
                   });
 
-                console.log(
+                logger.info(
                   `✅ Verification call initiated for ${fullName} (${formattedPhone}) - Execution: ${result.executionId}`
                 );
               } else {
-                console.warn(`❌ Verification call failed for ${fullName}: ${result.error || 'unknown error'}`);
+                logger.warn(`❌ Verification call failed for ${fullName}: ${result.error || 'unknown error'}`);
               }
             })
             .catch((err) => {
-              console.error('Failed to initiate verification call:', err);
+              logger.error('Failed to initiate verification call:', err);
             });
         }
       }
     } catch (err) {
-      console.error(`Error in call initiation for ${fullName}:`, err);
+      logger.error(`Error in call initiation for ${fullName}:`, err);
       // Don't fail the application if call fails
     }
   }

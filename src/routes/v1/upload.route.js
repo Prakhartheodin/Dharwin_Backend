@@ -7,7 +7,10 @@ import { uploadSingleDocument } from '../../controllers/upload.controller.js';
 const router = express.Router();
 
 // Use memory storage so file buffer is available for S3 upload
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: Number(process.env.UPLOAD_MAX_FILE_BYTES) || 25 * 1024 * 1024 },
+});
 
 // POST /v1/upload/single
 router.post('/single', auth(), requirePermissions('uploads.document'), upload.single('file'), uploadSingleDocument);

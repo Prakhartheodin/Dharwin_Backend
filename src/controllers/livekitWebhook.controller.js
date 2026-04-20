@@ -2,10 +2,12 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import httpStatus from 'http-status';
+import { WebhookReceiver } from 'livekit-server-sdk';
 import catchAsync from '../utils/catchAsync.js';
 import Recording from '../models/recording.model.js';
 import ChatCall from '../models/chatCall.model.js';
 import logger from '../config/logger.js';
+import config from '../config/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RECORDINGS_DIR = path.resolve(__dirname, '../../recordings');
@@ -40,7 +42,40 @@ const savePayloadLocally = async (payload) => {
  * Full URL example: https://your-backend.com/v1/webhooks/livekit-egress
  */
 const receiveLiveKitEgressWebhook = catchAsync(async (req, res) => {
-  const payload = req.body;
+  const raw =
+    req.rawBody && Buffer.isBuffer(req.rawBody)
+      ? req.rawBody.toString('utf8')
+      : typeof req.body === 'object' && req.body !== null
+        ? JSON.stringify(req.body)
+        : String(req.body || '');
+
+  const { apiKey, apiSecret } = config.livekit || {};
+  const hasLiveKitCreds = Boolean(apiKey && apiSecret);
+
+  if (config.env === 'production' && !hasLiveKitCreds) {
+    return res.status(httpStatus.SERVICE_UNAVAILABLE).json({
+      status: 'error',
+      message: 'LIVEKIT_API_KEY and LIVEKIT_API_SECRET must be set in production to verify egress webhooks.',
+    });
+  }
+
+  if (hasLiveKitCreds) {
+    try {
+      const receiver = new WebhookReceiver(apiKey, apiSecret);
+      await receiver.receive(raw, req.get('Authorization') || '', false);
+    } catch (err) {
+      logger.warn('[LiveKit Webhook] Verification failed', { error: err.message });
+      return res.status(httpStatus.UNAUTHORIZED).json({ status: 'error', message: 'Invalid LiveKit webhook signature' });
+    }
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(raw);
+  } catch {
+    return res.status(httpStatus.BAD_REQUEST).json({ status: 'error', message: 'Invalid JSON body' });
+  }
+
   const event = payload?.event;
 
   logger.info('[LiveKit Webhook] Received', { event, egressId: payload?.egressInfo?.egressId });
