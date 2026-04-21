@@ -34,6 +34,7 @@ import config from '../../config/config.js';
 import blogRoute from './blog.route.js';
 import livekitRoute from './livekit.route.js';
 import meetingRoute from './meeting.route.js';
+import internalMeetingRoute from './internalMeeting.route.js';
 import notificationRoute from './notification.route.js';
 import recordingRoute from './recording.route.js';
 import atsAnalyticsRoute from './atsAnalytics.route.js';
@@ -255,6 +256,10 @@ const defaultRoutes = [
   {
     path: '/meetings',
     route: meetingRoute,
+  },
+  {
+    path: '/internal-meetings',
+    route: internalMeetingRoute,
   },
   {
     path: '/notifications',

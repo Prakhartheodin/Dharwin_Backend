@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Meeting from '../models/meeting.model.js';
+import InternalMeeting from '../models/internalMeeting.model.js';
 import JobApplication from '../models/jobApplication.model.js';
 import Job from '../models/job.model.js';
 import Offer from '../models/offer.model.js';
@@ -9,6 +10,7 @@ import config from '../config/config.js';
 import { sendMeetingInvitationEmail } from './email.service.js';
 import logger from '../config/logger.js';
 import * as offerService from './offer.service.js';
+import { generateUniqueLivekitRoomId } from '../utils/livekitRoomId.js';
 
 /**
  * Display name for join link / email (hosts, candidate, recruiter, or email local-part).
@@ -82,7 +84,7 @@ const getInvitationEmails = (meeting) => {
  * @returns {Promise<Object>} Meeting with publicMeetingUrl
  */
 const createMeeting = async (body, userId) => {
-  const meetingId = await Meeting.generateMeetingId();
+  const meetingId = await generateUniqueLivekitRoomId();
   const durationMinutes = Number(body.durationMinutes) || 60;
   const meeting = await Meeting.create({
     ...body,
@@ -190,9 +192,16 @@ const getMeetingById = async (id) => {
  */
 const getMeetingByMeetingId = async (meetingId) => {
   const meeting = await Meeting.findOne({ meetingId }).populate('createdBy');
-  if (!meeting) return null;
-  const doc = meeting.toJSON();
-  doc.publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
+  if (meeting) {
+    const doc = meeting.toJSON();
+    doc.publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
+    return doc;
+  }
+  const internal = await InternalMeeting.findOne({ meetingId }).populate('createdBy');
+  if (!internal) return null;
+  const doc = internal.toJSON();
+  doc.publicMeetingUrl = getPublicMeetingUrl(internal.meetingId);
+  doc.meetingKind = 'internal';
   return doc;
 };
 
@@ -472,18 +481,31 @@ const moveMeetingToPreboarding = async (id, userId) => {
  */
 const endMeetingByRoomPublic = async (roomName, hostEmail) => {
   const meeting = await Meeting.findOne({ meetingId: roomName });
-  if (!meeting) {
+  if (meeting) {
+    const emailLower = (hostEmail || '').toLowerCase().trim();
+    const isHost = meeting.hosts?.some((h) => (h.email || '').toLowerCase().trim() === emailLower);
+    if (!isHost) {
+      throw new ApiError(httpStatus.FORBIDDEN, 'Only a host can end the meeting');
+    }
+    meeting.status = 'ended';
+    await meeting.save();
+    const doc = meeting.toJSON();
+    doc.publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
+    return doc;
+  }
+  const internal = await InternalMeeting.findOne({ meetingId: roomName });
+  if (!internal) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Meeting not found');
   }
   const emailLower = (hostEmail || '').toLowerCase().trim();
-  const isHost = meeting.hosts?.some((h) => (h.email || '').toLowerCase().trim() === emailLower);
+  const isHost = internal.hosts?.some((h) => (h.email || '').toLowerCase().trim() === emailLower);
   if (!isHost) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Only a host can end the meeting');
   }
-  meeting.status = 'ended';
-  await meeting.save();
-  const doc = meeting.toJSON();
-  doc.publicMeetingUrl = getPublicMeetingUrl(meeting.meetingId);
+  internal.status = 'ended';
+  await internal.save();
+  const doc = internal.toJSON();
+  doc.publicMeetingUrl = getPublicMeetingUrl(internal.meetingId);
   return doc;
 };
 

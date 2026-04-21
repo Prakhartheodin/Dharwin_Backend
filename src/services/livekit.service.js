@@ -14,6 +14,7 @@ import httpStatus from 'http-status';
 import { getMeetingByMeetingId } from './meeting.service.js';
 import Recording from '../models/recording.model.js';
 import Meeting from '../models/meeting.model.js';
+import InternalMeeting from '../models/internalMeeting.model.js';
 
 // Initialize LiveKit clients
 // Convert ws:// to http:// for SDK clients (they use HTTP, not WebSocket)
@@ -531,10 +532,12 @@ const admitParticipant = async (roomName, participantIdentity, participantName =
     admittedParticipants.get(roomName).add(participantIdentity);
 
     const meetingIdKey = String(roomName).trim();
-    await Meeting.updateOne(
-      { meetingId: meetingIdKey },
-      { $addToSet: { admittedIdentities: participantIdentity } }
-    ).catch((err) => logger.warn('[LiveKit] Persist admitted identity failed', { roomName: meetingIdKey, participantIdentity, err: err?.message }));
+    await Promise.all([
+      Meeting.updateOne({ meetingId: meetingIdKey }, { $addToSet: { admittedIdentities: participantIdentity } }),
+      InternalMeeting.updateOne({ meetingId: meetingIdKey }, { $addToSet: { admittedIdentities: participantIdentity } }),
+    ]).catch((err) =>
+      logger.warn('[LiveKit] Persist admitted identity failed', { roomName: meetingIdKey, participantIdentity, err: err?.message })
+    );
 
     // Generate new token with full permissions (force full permissions for admitted participants)
     const { token } = await generateAccessToken({
@@ -592,10 +595,13 @@ const removeParticipant = async (roomName, participantIdentity) => {
       roomAdmitted.delete(participantIdentity);
     }
 
-    await Meeting.updateOne(
-      { meetingId: String(roomName).trim() },
-      { $pull: { admittedIdentities: participantIdentity } }
-    ).catch((err) => logger.warn('[LiveKit] Remove admitted identity from DB failed', { roomName, participantIdentity, err: err?.message }));
+    const rid = String(roomName).trim();
+    await Promise.all([
+      Meeting.updateOne({ meetingId: rid }, { $pull: { admittedIdentities: participantIdentity } }),
+      InternalMeeting.updateOne({ meetingId: rid }, { $pull: { admittedIdentities: participantIdentity } }),
+    ]).catch((err) =>
+      logger.warn('[LiveKit] Remove admitted identity from DB failed', { roomName, participantIdentity, err: err?.message })
+    );
 
     return {
       identity: participantIdentity,

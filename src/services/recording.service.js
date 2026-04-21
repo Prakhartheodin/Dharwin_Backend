@@ -1,5 +1,6 @@
 import Recording from '../models/recording.model.js';
 import Meeting from '../models/meeting.model.js';
+import InternalMeeting from '../models/internalMeeting.model.js';
 import { generatePresignedRecordingPlaybackUrl } from '../config/s3.js';
 import ApiError from '../utils/ApiError.js';
 import httpStatus from 'http-status';
@@ -15,20 +16,18 @@ const resolveMeetingId = async (id) => {
   if (!id) {
     throw new ApiError(httpStatus.BAD_REQUEST, 'Meeting id is required');
   }
-  // If it looks like MongoDB ObjectId (24 hex chars), find meeting
   if (/^[a-fA-F0-9]{24}$/.test(id)) {
     const meeting = await Meeting.findById(id);
-    if (!meeting) {
-      throw new ApiError(httpStatus.NOT_FOUND, 'Meeting not found');
-    }
-    return meeting.meetingId;
-  }
-  // Otherwise treat as meetingId
-  const meeting = await Meeting.findOne({ meetingId: id });
-  if (!meeting) {
+    if (meeting) return meeting.meetingId;
+    const internal = await InternalMeeting.findById(id);
+    if (internal) return internal.meetingId;
     throw new ApiError(httpStatus.NOT_FOUND, 'Meeting not found');
   }
-  return id;
+  const meeting = await Meeting.findOne({ meetingId: id });
+  if (meeting) return id;
+  const internal = await InternalMeeting.findOne({ meetingId: id });
+  if (internal) return id;
+  throw new ApiError(httpStatus.NOT_FOUND, 'Meeting not found');
 };
 
 /**
@@ -89,10 +88,18 @@ const listAll = async (options = {}) => {
   ]);
 
   const meetingIds = [...new Set(recordings.map((r) => r.meetingId))];
-  const meetings = await Meeting.find({ meetingId: { $in: meetingIds } })
-    .select('meetingId title')
-    .lean();
-  const meetingMap = Object.fromEntries(meetings.map((m) => [m.meetingId, m]));
+  const [meetings, internalMeetings] = await Promise.all([
+    Meeting.find({ meetingId: { $in: meetingIds } })
+      .select('meetingId title')
+      .lean(),
+    InternalMeeting.find({ meetingId: { $in: meetingIds } })
+      .select('meetingId title')
+      .lean(),
+  ]);
+  const meetingMap = Object.fromEntries([
+    ...meetings.map((m) => [m.meetingId, m]),
+    ...internalMeetings.map((m) => [m.meetingId, m]),
+  ]);
 
   const result = [];
   for (const rec of recordings) {

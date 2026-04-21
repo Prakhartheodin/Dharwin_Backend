@@ -1,4 +1,8 @@
 import * as meetingService from './meeting.service.js';
+import {
+  autoEndExpiredInternalMeetings,
+  sendUpcomingInternalMeetingReminders,
+} from './internalMeeting.service.js';
 import logger from '../config/logger.js';
 
 const DEFAULT_INTERVAL_MINUTES = 5;
@@ -7,9 +11,15 @@ let intervalId = null;
 
 const runAutoEndMeetings = async () => {
   try {
-    const count = await meetingService.autoEndExpiredMeetings();
-    if (count > 0) {
-      logger.info(`[Meeting scheduler] Auto-ended ${count} expired meeting(s)`);
+    const [count, internalCount] = await Promise.all([
+      meetingService.autoEndExpiredMeetings(),
+      autoEndExpiredInternalMeetings(),
+    ]);
+    const total = count + internalCount;
+    if (total > 0) {
+      logger.info(
+        `[Meeting scheduler] Auto-ended ${count} interview(s) and ${internalCount} internal meeting(s) (${total} total)`
+      );
     }
   } catch (err) {
     logger.error('[Meeting scheduler] Run failed:', err?.message || err);
@@ -18,7 +28,7 @@ const runAutoEndMeetings = async () => {
 
 const runUpcomingMeetingReminders = async () => {
   try {
-    await meetingService.sendUpcomingMeetingReminders();
+    await Promise.all([meetingService.sendUpcomingMeetingReminders(), sendUpcomingInternalMeetingReminders()]);
   } catch (err) {
     logger.error('[Meeting scheduler] Upcoming reminders failed:', err?.message || err);
   }

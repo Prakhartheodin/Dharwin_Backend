@@ -101,20 +101,16 @@ export const permissionAliases = {
   // ATS offers: map ats.offers:* to candidates (offers are part of ATS pipeline)
   'offers.read': ['offers.read', 'ats.offers:view', 'ats.offers:view,create,edit,delete', 'candidates.read', 'candidates.manage'],
   'offers.manage': ['offers.manage', 'ats.offers:create,edit,delete', 'ats.offers:view,create,edit,delete', 'candidates.manage'],
-  // Meetings (communication.meetings). ATS Interviews (ats.interviews → interviews.read/manage) uses same meeting APIs.
-  'meetings.read': [
-    'meetings.read',
-    'communication.meetings:view',
-    'communication.meetings:view,create,edit,delete',
-    'interviews.read',
-    'interviews.manage',
-  ],
+  // Communication internal meetings (/internal-meetings). Domain: communication.meetings → meetings.read / meetings.manage
+  'meetings.read': ['meetings.read', 'communication.meetings:view', 'communication.meetings:view,create,edit,delete'],
   'meetings.manage': [
     'meetings.manage',
     'communication.meetings:create,edit,delete',
     'communication.meetings:view,create,edit,delete',
-    'interviews.manage',
   ],
+  // ATS interviews (/meetings). Domain: ats.interviews → interviews.read / interviews.manage
+  'interviews.read': ['interviews.read'],
+  'interviews.manage': ['interviews.manage'],
   // Calls (bolna, communication) - from communication.calling
   // permission.service derives communication.calling:view → calling.read; we must grant calls.* via calling.* too
   'calls.read': ['calls.read', 'calling.read', 'communication.calling:view', 'communication.calling:view,create,edit,delete'],
