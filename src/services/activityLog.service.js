@@ -48,7 +48,7 @@ const normalizeIdsForClient = (plain) => {
  * @param {import('express').Request} req
  * @returns {string|null}
  */
-export const requestPathTemplate = (req) => {
+const requestPathTemplate = (req) => {
   if (!req) return null;
   const base = req.baseUrl || '';
   const pattern = req.route?.path != null ? req.route.path : req.path;

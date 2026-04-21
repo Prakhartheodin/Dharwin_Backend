@@ -22,7 +22,7 @@ const getCannedResponseById = async (id) => {
   return response;
 };
 
-const updateCannedResponseById = async (id, updateData, userId) => {
+const updateCannedResponseById = async (id, updateData, _userId) => {
   const response = await CannedResponse.findById(id);
   if (!response) throw new ApiError(httpStatus.NOT_FOUND, 'Canned response not found');
   Object.assign(response, updateData);

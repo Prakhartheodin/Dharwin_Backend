@@ -20,7 +20,6 @@ const requireAttendanceView = async (req, res, next) => {
     return next();
   }
 
-  const userId = req.user.id || req.user._id?.toString?.();
   const userDoc = req.user;
   let isAdmin = userDoc.role === 'admin' || userDoc.role === 'Administrator';
   if (!isAdmin && (userDoc.roleIds || []).length > 0) {

@@ -27,4 +27,4 @@
 
 ## Rollback / data repair
 
-- Optional one-off: from the backend app root, `DRY_RUN=1 node scripts/backfill-user-candidate-phone.js` then run without `DRY_RUN` when ready.
+- If legacy rows are out of sync, align `phoneNumber` / `countryCode` on `User` and linked `Candidate` in Mongo (or via admin/API) as needed; there is no bundled backfill script in this repo.

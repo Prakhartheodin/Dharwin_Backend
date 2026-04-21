@@ -5,6 +5,16 @@ import Project from '../models/project.model.js';
 import ApiError from '../utils/ApiError.js';
 import { userIsAdmin } from '../utils/roleHelpers.js';
 
+const TASK_LIST_LIMIT_MAX = 200;
+const escapeRegex = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const sanitizeTaskWritePayload = (payload = {}) => {
+  const next = { ...payload };
+  // Server-managed counters; never trust direct client writes.
+  delete next.likesCount;
+  delete next.commentsCount;
+  return next;
+};
+
 const isOwnerOrAdmin = async (user, resource) => {
   if (!resource) return false;
   const admin = await userIsAdmin(user);
@@ -13,9 +23,10 @@ const isOwnerOrAdmin = async (user, resource) => {
 };
 
 const createTask = async (createdById, payload) => {
+  const safePayload = sanitizeTaskWritePayload(payload);
   const task = await Task.create({
     createdBy: createdById,
-    ...payload,
+    ...safePayload,
   });
   await task.populate([
     { path: 'createdBy', select: 'name email' },
@@ -47,7 +58,7 @@ const createTask = async (createdById, payload) => {
 
 const queryTasks = async (filter, options) => {
   if (filter.search) {
-    const searchRegex = new RegExp(filter.search, 'i');
+    const searchRegex = new RegExp(escapeRegex(filter.search), 'i');
     filter.$or = [
       { title: searchRegex },
       { description: searchRegex },
@@ -114,7 +125,9 @@ const queryTasks = async (filter, options) => {
   }
 
   const sort = options.sortBy || '-createdAt';
-  const limit = options.limit && parseInt(options.limit, 10) > 0 ? parseInt(options.limit, 10) : 100;
+  const limit = options.limit && parseInt(options.limit, 10) > 0
+    ? Math.min(TASK_LIST_LIMIT_MAX, parseInt(options.limit, 10))
+    : 100;
   const page = options.page && parseInt(options.page, 10) > 0 ? parseInt(options.page, 10) : 1;
   const skip = (page - 1) * limit;
 
@@ -153,7 +166,7 @@ const updateTaskById = async (id, updateBody, currentUser) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
   const prevAssigned = new Set((task.assignedTo || []).map((u) => String(u._id || u)));
-  Object.assign(task, updateBody);
+  Object.assign(task, sanitizeTaskWritePayload(updateBody));
   await task.save();
   await task.populate([
     { path: 'createdBy', select: 'name email' },

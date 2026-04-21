@@ -324,7 +324,7 @@ function parseMultiSheetExcel(fileBuffer) {
 /**
  * Validate a single candidate
  */
-function validateCandidate(candidate, index) {
+function validateCandidate(candidate, _index) {
   const errors = [];
   
   if (!candidate.fullName) errors.push('Full Name is required');

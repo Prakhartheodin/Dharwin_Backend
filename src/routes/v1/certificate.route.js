@@ -1,7 +1,5 @@
 import express from 'express';
-import auth from '../../middlewares/auth.js';
 import validate from '../../middlewares/validate.js';
-import requirePermissions from '../../middlewares/requirePermissions.js';
 import * as certificateValidation from '../../validations/certificate.validation.js';
 import * as certificateController from '../../controllers/certificate.controller.js';
 

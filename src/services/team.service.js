@@ -7,6 +7,7 @@ import { generatePresignedDownloadUrl } from '../config/s3.js';
 import logger from '../config/logger.js';
 
 const escapeRegex = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const TEAM_LIST_LIMIT_MAX = 200;
 
 const normalizeMemberEmail = (email) => String(email ?? '').trim().toLowerCase();
 
@@ -17,9 +18,12 @@ const normalizeMemberEmail = (email) => String(email ?? '').trim().toLowerCase()
  * @param {import('mongoose').Document[]|Record<string, unknown>[]} members
  * @returns {Promise<Record<string, unknown>[]>}
  */
-const enrichTeamMembersWithCandidateProfilePictureUrls = async (members) => {
+const enrichTeamMembersWithCandidateProfilePictureUrls = async (members, { includeCandidateMedia = false } = {}) => {
   if (!members?.length) {
     return (members || []).map((m) => (m.toJSON ? m.toJSON() : { ...m }));
+  }
+  if (!includeCandidateMedia) {
+    return members.map((m) => (m.toJSON ? m.toJSON() : { ...m }));
   }
   const normalizedEmails = [
     ...new Set(members.map((m) => normalizeMemberEmail(m.email)).filter(Boolean)),
@@ -77,7 +81,7 @@ const createTeamMember = async (createdById, payload) => {
 
 const queryTeamMembers = async (filter, options) => {
   if (filter.search) {
-    const searchRegex = new RegExp(filter.search, 'i');
+    const searchRegex = new RegExp(escapeRegex(filter.search), 'i');
     filter.$or = [
       { name: searchRegex },
       { email: searchRegex },
@@ -89,9 +93,11 @@ const queryTeamMembers = async (filter, options) => {
   const userId = filter.userId;
   const userRoleIds = filter.userRoleIds;
   const userEmail = filter.userEmail;
+  const canViewCandidateMedia = Boolean(filter.canViewCandidateMedia);
   delete filter.userRoleIds;
   delete filter.userId;
   delete filter.userEmail;
+  delete filter.canViewCandidateMedia;
 
   const isAdmin = await userIsAdmin({ roleIds: userRoleIds || [] });
   let finalFilter = { ...filter };
@@ -121,7 +127,9 @@ const queryTeamMembers = async (filter, options) => {
   }
 
   const sort = options.sortBy || '-createdAt';
-  const limit = options.limit && parseInt(options.limit, 10) > 0 ? parseInt(options.limit, 10) : 100;
+  const limit = options.limit && parseInt(options.limit, 10) > 0
+    ? Math.min(TEAM_LIST_LIMIT_MAX, parseInt(options.limit, 10))
+    : 100;
   const page = options.page && parseInt(options.page, 10) > 0 ? parseInt(options.page, 10) : 1;
   const skip = (page - 1) * limit;
 
@@ -139,7 +147,7 @@ const queryTeamMembers = async (filter, options) => {
   ]);
 
   const totalPages = Math.ceil(totalResults / limit);
-  const enrichedResults = await enrichTeamMembersWithCandidateProfilePictureUrls(results);
+  const enrichedResults = await enrichTeamMembersWithCandidateProfilePictureUrls(results, { includeCandidateMedia: canViewCandidateMedia });
   return { results: enrichedResults, page, limit, totalPages, totalResults };
 };
 

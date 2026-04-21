@@ -9,7 +9,6 @@ import Candidate from '../models/candidate.model.js';
 import AssignmentRun from '../models/assignmentRun.model.js';
 import AssignmentRow from '../models/assignmentRow.model.js';
 import { getProjectById, updateProjectById } from './project.service.js';
-import { createTask } from './task.service.js';
 import TeamMember from '../models/team.model.js';
 import { createTeamGroup, getTeamGroupById } from './teamGroup.service.js';
 import { createTeamMember } from './team.service.js';
@@ -20,6 +19,8 @@ import config from '../config/config.js';
 import logger from '../config/logger.js';
 import { notify } from './notification.service.js';
 import { CANDIDATE_PROJECT_TASK_TYPE_SLUGS } from '../constants/candidateProjectTaskTypes.js';
+
+const ASSIGNMENT_ROW_NOTES_MAX = 500;
 
 export function ensurePmAssistantEnabled() {
   if (process.env.PM_ASSISTANT_ENABLED === 'false') {
@@ -311,64 +312,85 @@ export async function applyTaskBreakdown(projectId, user, { tasks, idempotencyKe
 
   const createdById = uid;
   const created = [];
-  for (const row of normalizedRows) {
-    const orderValue = row.order != null ? row.order : nextSequential;
-    if (row.order == null) nextSequential += 1;
-    // eslint-disable-next-line no-await-in-loop
-    const task = await createTask(createdById, {
-      title: row.title,
-      description: row.description,
-      status: row.status,
-      projectId: projectOid,
-      tags: row.tags.length ? row.tags : undefined,
-      requiredSkills: row.requiredSkills.length ? row.requiredSkills : undefined,
-      order: orderValue,
+  let responseBody = null;
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      for (const row of normalizedRows) {
+        const orderValue = row.order != null ? row.order : nextSequential;
+        if (row.order == null) nextSequential += 1;
+        // eslint-disable-next-line no-await-in-loop
+        const [task] = await Task.create(
+          [{
+            createdBy: createdById,
+            title: row.title,
+            description: row.description,
+            status: row.status,
+            projectId: projectOid,
+            tags: row.tags.length ? row.tags : undefined,
+            requiredSkills: row.requiredSkills.length ? row.requiredSkills : undefined,
+            order: orderValue,
+          }],
+          { session }
+        );
+        created.push(task);
+      }
+
+      await Project.updateOne(
+        { _id: projectOid },
+        { $inc: { totalTasks: created.length }, $set: { updatedAt: new Date() } }
+      ).session(session).exec();
+
+      const populatedCreated = await Task.find({ _id: { $in: created.map((t) => t._id) } })
+        .populate([
+          { path: 'createdBy', select: 'name email' },
+          { path: 'projectId', select: 'name' },
+        ])
+        .session(session)
+        .exec();
+
+      responseBody = JSON.parse(
+        JSON.stringify({
+          createdCount: created.length,
+          tasks: populatedCreated.map((doc) => (typeof doc.toJSON === 'function' ? doc.toJSON() : doc)),
+        })
+      );
+
+      if (keyHash) {
+        await TaskBreakdownIdempotency.create(
+          [{
+            projectId: projectOid,
+            userId: userOid,
+            keyHash,
+            payloadHash,
+            responseBody,
+          }],
+          { session }
+        );
+      }
     });
-    created.push(task);
-  }
-
-  await Project.updateOne(
-    { _id: projectOid },
-    { $inc: { totalTasks: created.length }, $set: { updatedAt: new Date() } }
-  ).exec();
-
-  const responseBody = JSON.parse(
-    JSON.stringify({
-      createdCount: created.length,
-      tasks: created.map((doc) => (typeof doc.toJSON === 'function' ? doc.toJSON() : doc)),
-    })
-  );
-
-  if (keyHash) {
-    try {
-      await TaskBreakdownIdempotency.create({
+  } catch (err) {
+    const dup = err?.code === 11000;
+    if (dup && keyHash) {
+      const winner = await TaskBreakdownIdempotency.findOne({
         projectId: projectOid,
         userId: userOid,
         keyHash,
-        payloadHash,
-        responseBody,
-      });
-    } catch (err) {
-      const dup = err?.code === 11000;
-      if (dup) {
-        const winner = await TaskBreakdownIdempotency.findOne({
-          projectId: projectOid,
-          userId: userOid,
-          keyHash,
-        }).lean();
-        if (winner?.payloadHash === payloadHash) {
-          return winner.responseBody;
-        }
-        throw new ApiError(
-          httpStatus.CONFLICT,
-          'Idempotency-Key was already used with a different request body.',
-          true,
-          '',
-          { errorCode: 'IDEMPOTENCY_PAYLOAD_MISMATCH' }
-        );
+      }).lean();
+      if (winner?.payloadHash === payloadHash) {
+        return winner.responseBody;
       }
-      throw err;
+      throw new ApiError(
+        httpStatus.CONFLICT,
+        'Idempotency-Key was already used with a different request body.',
+        true,
+        '',
+        { errorCode: 'IDEMPOTENCY_PAYLOAD_MISMATCH' }
+      );
     }
+    throw err;
+  } finally {
+    await session.endSession();
   }
 
   logger.info('[PM Assistant] applyTaskBreakdown completed', {
@@ -920,7 +942,7 @@ export async function patchAssignmentRun(runId, user, { rows }) {
           : null;
     }
     if (patch.gap !== undefined) update.gap = !!patch.gap;
-    if (patch.notes !== undefined) update.notes = String(patch.notes).slice(0, 500);
+    if (patch.notes !== undefined) update.notes = String(patch.notes).slice(0, ASSIGNMENT_ROW_NOTES_MAX);
     await AssignmentRow.updateOne({ _id: id, runId: run._id }, { $set: update }).exec();
   }
   return getAssignmentRun(runId, user);
@@ -1186,56 +1208,62 @@ export async function applyAssignmentRun(runId, user) {
   }
 
   const rows = await AssignmentRow.find({ runId: run._id }).exec();
-  const projectAssignees = new Set(
-    (project.assignedTo || []).map((u) => String(u?._id || u || '')).filter(Boolean)
-  );
-  const thisProjectId = String(project._id);
+  const projectAssignees = new Set((project.assignedTo || []).map((u) => String(u?._id || u || '')).filter(Boolean));
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const ownersToAdd = new Set();
+      for (const row of rows) {
+        if (!row.taskId || row.gap || !row.recommendedCandidateId) continue;
+        // eslint-disable-next-line no-await-in-loop
+        const candidate = await Candidate.findById(row.recommendedCandidateId).select('owner').lean().session(session);
+        if (!candidate?.owner) continue;
+        const ownerId = String(candidate.owner);
+        const ownerOid = mongoose.Types.ObjectId.isValid(ownerId)
+          ? new mongoose.Types.ObjectId(ownerId)
+          : ownerId;
+        // eslint-disable-next-line no-await-in-loop
+        const activeOnOtherProjects = await Project.countDocuments({
+          _id: { $ne: project._id },
+          status: { $in: ['Inprogress', 'On hold'] },
+          assignedTo: ownerOid,
+        }).session(session).exec();
+        if (activeOnOtherProjects >= 2 && !projectAssignees.has(ownerId)) {
+          throw new ApiError(
+            httpStatus.CONFLICT,
+            'Candidate capacity limit reached (max 2 active projects as project assignee, excluding this project if already a member).'
+          );
+        }
+        ownersToAdd.add(ownerId);
+        // eslint-disable-next-line no-await-in-loop
+        await Task.updateOne({ _id: row.taskId, projectId: project._id }, { $set: { assignedTo: [ownerId] } }).session(session).exec();
+      }
 
-  const ownersToAdd = new Set();
-  for (const row of rows) {
-    if (!row.taskId || row.gap || !row.recommendedCandidateId) continue;
-    const candidate = await Candidate.findById(row.recommendedCandidateId).select('owner').lean();
-    if (!candidate?.owner) continue;
-    const ownerId = String(candidate.owner);
-    const ownerOid = mongoose.Types.ObjectId.isValid(ownerId)
-      ? new mongoose.Types.ObjectId(ownerId)
-      : ownerId;
-    const activeOnOtherProjects = await Project.countDocuments({
-      _id: { $ne: project._id },
-      status: { $in: ['Inprogress', 'On hold'] },
-      assignedTo: ownerOid,
-    }).exec();
-    if (activeOnOtherProjects >= 2 && !projectAssignees.has(ownerId)) {
-      throw new ApiError(
-        httpStatus.CONFLICT,
-        'Candidate capacity limit reached (max 2 active projects as project assignee, excluding this project if already a member).'
-      );
-    }
-    ownersToAdd.add(ownerId);
-    await Task.updateOne({ _id: row.taskId, projectId: project._id }, { $set: { assignedTo: [ownerId] } }).exec();
+      if (ownersToAdd.size > 0) {
+        const oidList = [...ownersToAdd]
+          .filter((id) => mongoose.Types.ObjectId.isValid(id))
+          .map((id) => new mongoose.Types.ObjectId(id));
+        if (oidList.length > 0) {
+          await Project.updateOne({ _id: project._id }, { $addToSet: { assignedTo: { $each: oidList } } }).session(session).exec();
+        }
+      }
+
+      if (run.supervisorValue) {
+        await Project.updateOne({ _id: project._id }, { $set: { projectManager: run.supervisorValue } }).session(session).exec();
+      }
+
+      run.status = 'applied';
+      await run.save({ session });
+    });
+  } finally {
+    await session.endSession();
   }
-
-  if (ownersToAdd.size > 0) {
-    const oidList = [...ownersToAdd]
-      .filter((id) => mongoose.Types.ObjectId.isValid(id))
-      .map((id) => new mongoose.Types.ObjectId(id));
-    if (oidList.length > 0) {
-      await Project.updateOne({ _id: project._id }, { $addToSet: { assignedTo: { $each: oidList } } }).exec();
-    }
-  }
-
-  if (run.supervisorValue) {
-    await updateProjectById(thisProjectId, { projectManager: run.supervisorValue }, user);
-  }
-
-  run.status = 'applied';
-  await run.save();
 
   let teamSync = { teamGroup: null, teamGroupId: null, membersAdded: 0, usedExistingTeam: false, syncError: null };
   try {
     teamSync = { ...(await syncAiStaffedCandidatesToProjectTeam(project, user, rows)), syncError: null };
   } catch (err) {
-    logger.error('[PM Assistant] team sync after apply failed', { err: err?.message, runId, projectId: thisProjectId });
+    logger.error('[PM Assistant] team sync after apply failed', { err: err?.message, runId, projectId: String(project._id) });
     teamSync.syncError = err?.message || 'Team roster sync failed';
   }
 

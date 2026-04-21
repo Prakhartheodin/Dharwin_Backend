@@ -81,8 +81,6 @@ const initiateCall = catchAsync(async (req, res) => {
 const initiateCandidateCall = catchAsync(async (req, res) => {
   const {
     candidateId,
-    candidateName,
-    email,
     phoneNumber,
     countryCode,
     jobId,

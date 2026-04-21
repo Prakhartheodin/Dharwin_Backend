@@ -18,10 +18,8 @@ const getStudentCourses = catchAsync(async (req, res) => {
   // Check if student can view own courses or has permission
   const isAdmin = await userIsAdmin(req.user);
   if (!isAdmin) {
-    // For students, only allow viewing their own courses
-    const studentUserId = req.user.id;
-    // TODO: Verify studentId matches student's user ID
-    // For now, we'll allow if they have students.courses.read permission
+    // For students, only allow viewing their own courses.
+    // TODO: verify studentId matches student's user id if stricter scoping is required.
   }
   
   const result = await studentCourseService.queryStudentCourses(studentId, filter, options);

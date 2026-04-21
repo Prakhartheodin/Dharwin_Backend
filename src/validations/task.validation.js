@@ -21,8 +21,6 @@ const createTask = {
       requiredSkills: Joi.array().items(Joi.string().trim().max(128)).max(30).optional(),
       assignedTo: Joi.array().items(Joi.string().custom(objectId)).optional(),
       projectId: Joi.string().custom(objectId).optional(),
-      likesCount: Joi.number().integer().min(0).optional(),
-      commentsCount: Joi.number().integer().min(0).optional(),
       imageUrl: Joi.string().uri().optional().allow('', null),
       order: Joi.number().integer().optional(),
     })
@@ -36,7 +34,7 @@ const getTasks = {
     search: Joi.string().optional(),
     assignedToMe: Joi.boolean().optional(),
     sortBy: Joi.string().optional(),
-    limit: Joi.number().integer().optional(),
+    limit: Joi.number().integer().min(1).max(200).optional(),
     page: Joi.number().integer().optional(),
   }),
 };
@@ -66,8 +64,6 @@ const updateTask = {
       requiredSkills: Joi.array().items(Joi.string().trim().max(128)).max(30).optional(),
       assignedTo: Joi.array().items(Joi.string().custom(objectId)).optional(),
       projectId: Joi.string().custom(objectId).optional(),
-      likesCount: Joi.number().integer().min(0).optional(),
-      commentsCount: Joi.number().integer().min(0).optional(),
       imageUrl: Joi.string().uri().optional().allow('', null),
       order: Joi.number().integer().optional(),
     })

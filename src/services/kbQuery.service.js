@@ -10,7 +10,7 @@ import * as voiceAgentService from './voiceAgent.service.js';
 import { embedQuery } from '../utils/embedding.util.js';
 import { topKCosine } from '../utils/vectorSearch.util.js';
 
-export const KB_FALLBACK_ANSWER =
+const KB_FALLBACK_ANSWER =
   "I don't have that information in our knowledge base right now. Our team will follow up with details by email.";
 
 const PROMPT_SEED_QUERY =

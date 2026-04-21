@@ -14,7 +14,8 @@ import {
 const create = catchAsync(async (req, res) => {
   const createdById = req.user.id || req.user._id;
   const member = await createTeamMember(createdById, req.body);
-  const [out] = await enrichTeamMembersWithCandidateProfilePictureUrls([member]);
+  const canViewCandidateMedia = req.authContext?.permissions?.has('candidates.read');
+  const [out] = await enrichTeamMembersWithCandidateProfilePictureUrls([member], { includeCandidateMedia: canViewCandidateMedia });
   res.status(httpStatus.CREATED).send(out);
 });
 
@@ -23,6 +24,7 @@ const list = catchAsync(async (req, res) => {
   filter.userRoleIds = req.user.roleIds || [];
   filter.userId = req.user.id || req.user._id;
   filter.userEmail = req.user.email;
+  filter.canViewCandidateMedia = req.authContext?.permissions?.has('candidates.read');
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await queryTeamMembers(filter, options);
   res.send(result);
@@ -33,13 +35,15 @@ const get = catchAsync(async (req, res) => {
   if (!member) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found');
   }
-  const [out] = await enrichTeamMembersWithCandidateProfilePictureUrls([member]);
+  const canViewCandidateMedia = req.authContext?.permissions?.has('candidates.read');
+  const [out] = await enrichTeamMembersWithCandidateProfilePictureUrls([member], { includeCandidateMedia: canViewCandidateMedia });
   res.send(out);
 });
 
 const update = catchAsync(async (req, res) => {
   const member = await updateTeamMemberById(req.params.teamMemberId, req.body, req.user);
-  const [out] = await enrichTeamMembersWithCandidateProfilePictureUrls([member]);
+  const canViewCandidateMedia = req.authContext?.permissions?.has('candidates.read');
+  const [out] = await enrichTeamMembersWithCandidateProfilePictureUrls([member], { includeCandidateMedia: canViewCandidateMedia });
   res.send(out);
 });
 

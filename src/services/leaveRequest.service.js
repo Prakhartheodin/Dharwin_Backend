@@ -2,7 +2,6 @@ import httpStatus from 'http-status';
 import ApiError from '../utils/ApiError.js';
 import LeaveRequest from '../models/leaveRequest.model.js';
 import Student from '../models/student.model.js';
-import Role from '../models/role.model.js';
 import attendanceService from './attendance.service.js';
 import pick from '../utils/pick.js';
 import { userIsAdminOrAgent } from '../utils/roleHelpers.js';

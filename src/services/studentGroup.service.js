@@ -2,9 +2,7 @@ import mongoose from 'mongoose';
 import httpStatus from 'http-status';
 import StudentGroup from '../models/studentGroup.model.js';
 import Student from '../models/student.model.js';
-import Holiday from '../models/holiday.model.js';
 import ApiError from '../utils/ApiError.js';
-import pick from '../utils/pick.js';
 import attendanceService from './attendance.service.js';
 
 const createStudentGroup = async (groupBody, user) => {
@@ -95,7 +93,7 @@ const getGroupStudents = async (groupId, query = {}) => {
   };
 };
 
-const updateStudentGroupById = async (groupId, updateBody, user) => {
+const updateStudentGroupById = async (groupId, updateBody, _user) => {
   const group = await StudentGroup.findById(groupId);
   if (!group) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Student group not found');
@@ -136,7 +134,7 @@ const updateStudentGroupById = async (groupId, updateBody, user) => {
   return plain;
 };
 
-const deleteStudentGroupById = async (groupId, user) => {
+const deleteStudentGroupById = async (groupId, _user) => {
   const exists = await StudentGroup.findById(groupId).select('_id').lean();
   if (!exists) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Student group not found');
@@ -144,7 +142,7 @@ const deleteStudentGroupById = async (groupId, user) => {
   await StudentGroup.findByIdAndDelete(groupId);
 };
 
-const addStudentsToGroup = async (groupId, studentIds, user) => {
+const addStudentsToGroup = async (groupId, studentIds, _user) => {
   const count = await Student.countDocuments({ _id: { $in: studentIds } });
   if (count !== studentIds.length) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Some students not found. Check that all student IDs exist.');
@@ -165,7 +163,7 @@ const addStudentsToGroup = async (groupId, studentIds, user) => {
 
   const holidayIds = (group.holidays || []).map((h) => String(h));
   if (holidayIds.length > 0) {
-    await attendanceService.addHolidaysToStudents(newIds, holidayIds, user);
+    await attendanceService.addHolidaysToStudents(newIds, holidayIds, _user);
   }
 
   const updated = await StudentGroup.findById(groupId).populate('createdBy', 'name email').lean();

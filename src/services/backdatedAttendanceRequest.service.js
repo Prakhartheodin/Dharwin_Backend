@@ -4,7 +4,6 @@ import BackdatedAttendanceRequest from '../models/backdatedAttendanceRequest.mod
 import Student from '../models/student.model.js';
 import Attendance from '../models/attendance.model.js';
 import User from '../models/user.model.js';
-import Role from '../models/role.model.js';
 import pick from '../utils/pick.js';
 import { userIsAdminOrAgent } from '../utils/roleHelpers.js';
 

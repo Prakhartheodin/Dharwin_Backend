@@ -15,7 +15,7 @@ const getAccessTokenFromRequest = (req) => {
   return req.cookies?.[ACCESS_TOKEN_COOKIE] || null;
 };
 
-const verifyCallback = (req, resolve, reject, requiredRights) => async (err, user, info) => {
+const verifyCallback = (req, resolve, reject, _requiredRights) => async (err, user, info) => {
   if (err || info || !user) {
     return reject(new ApiError(httpStatus.UNAUTHORIZED, 'Please authenticate'));
   }

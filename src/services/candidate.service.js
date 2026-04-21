@@ -18,6 +18,92 @@ import { resolveCompanyEmailSettingsUserId } from './emailConnectionPolicy.servi
 /** Max rows per bulk CSV export (same filter scope as list). */
 const MAX_CANDIDATE_EXPORT = Number(process.env.MAX_CANDIDATE_EXPORT) || 10000;
 
+/**
+ * When PATCH sends documents without S3 keys (e.g. frontend only sent label+url), keep stored keys/metadata.
+ * Matches rows by label (first unused match per label).
+ */
+const mergeDocumentsPreserveKeys = (existingDocs = [], incomingDocs = []) => {
+  if (!Array.isArray(incomingDocs)) return existingDocs;
+  const pool = (existingDocs || []).map((d) => {
+    const plain = d?.toObject ? d.toObject() : { ...d };
+    return { ...plain, _merged: false };
+  });
+  return incomingDocs.map((inc) => {
+    const incLabel = (inc.label || '').trim();
+    let pi = pool.findIndex(
+      (p) =>
+        !p._merged &&
+        (p.label || '').trim() === incLabel &&
+        (String(inc.key || '') === String(p.key || '') || !inc.key)
+    );
+    if (pi === -1) {
+      pi = pool.findIndex((p) => !p._merged && (p.label || '').trim() === incLabel);
+    }
+    if (pi === -1) return inc;
+    const prev = pool[pi];
+    pool[pi] = { ...prev, _merged: true };
+    const out = { ...inc };
+    if (prev.key && (!inc.key || String(inc.key).trim() === '')) {
+      out.key = prev.key;
+    }
+    if (prev.originalName && !inc.originalName) out.originalName = prev.originalName;
+    if (!(out.size > 0) && prev.size) out.size = prev.size;
+    if (!out.mimeType && prev.mimeType) out.mimeType = prev.mimeType;
+    if (!out.type && prev.type) out.type = prev.type;
+    if (prev.url && (!inc.url || /localhost|127\.0\.0\.1/i.test(String(inc.url)))) {
+      out.url = prev.url;
+    }
+    return out;
+  });
+};
+
+/**
+ * Parse S3 object key from a typical HTTPS object URL (same rules as getDocumentDownloadUrl).
+ * Returns null for localhost or non-S3 URLs.
+ */
+const extractS3KeyFromUrlString = (url) => {
+  if (!url || typeof url !== 'string') return null;
+  if (/localhost|127\.0\.0\.1/i.test(url)) return null;
+  const pattern1 = /https?:\/\/[^/]+\.s3[.-][^/]+\.amazonaws\.com\/([^?]+)/;
+  const match1 = url.match(pattern1);
+  if (match1) return decodeURIComponent(match1[1]);
+  const pattern2 = /https?:\/\/s3[.-][^/]+\.amazonaws\.com\/[^/]+\/([^?]+)/;
+  const match2 = url.match(pattern2);
+  if (match2) return decodeURIComponent(match2[1]);
+  return null;
+};
+
+/** Same merge idea for salary slips (match month + year). */
+const mergeSalarySlipsPreserveKeys = (existing = [], incoming = []) => {
+  if (!Array.isArray(incoming)) return existing;
+  const pool = (existing || []).map((s) => {
+    const plain = s?.toObject ? s.toObject() : { ...s };
+    return { ...plain, _merged: false };
+  });
+  return incoming.map((inc) => {
+    const mk = `${String(inc.month || '').trim()}-${String(inc.year ?? '')}`;
+    const pi = pool.findIndex(
+      (p) =>
+        !p._merged && `${String(p.month || '').trim()}-${String(p.year ?? '')}` === mk
+    );
+    if (pi === -1) return inc;
+    const prev = pool[pi];
+    pool[pi] = { ...prev, _merged: true };
+    const out = { ...inc };
+    if (prev.key && (!inc.key || String(inc.key).trim() === '')) out.key = prev.key;
+    if (prev.originalName && !inc.originalName) out.originalName = prev.originalName;
+    if (!(out.size > 0) && prev.size) out.size = prev.size;
+    if (!out.mimeType && prev.mimeType) out.mimeType = prev.mimeType;
+    if (
+      prev.documentUrl &&
+      (!inc.documentUrl || /localhost|127\.0\.0\.1/i.test(String(inc.documentUrl)))
+    ) {
+      out.documentUrl = prev.documentUrl;
+    }
+    return out;
+  });
+};
+
 /** User may have canManageCandidates set by controller (from candidates.manage permission). */
 const isOwnerOrAdmin = (user, candidate) => {
   if (!candidate) return false;
@@ -1014,21 +1100,38 @@ const getCandidateById = async (id) => {
       }
     }
     
-    // Regenerate document URLs to use direct S3 presigned URLs (like salary slips)
+    // Repair missing keys from HTTPS S3 URLs, then regenerate presigned document URLs
     if (candidate.documents && candidate.documents.length > 0) {
+      let documentsNeedsSave = false;
+      for (let i = 0; i < candidate.documents.length; i += 1) {
+        const doc = candidate.documents[i];
+        if (doc.key) continue;
+        if (!doc.url) continue;
+        const extracted = extractS3KeyFromUrlString(doc.url);
+        if (!extracted) continue;
+        try {
+          await generatePresignedDownloadUrl(extracted, 120);
+          doc.key = extracted;
+          documentsNeedsSave = true;
+        } catch (e) {
+          logger.warn(`getCandidateById ${id} doc ${i}: S3 key from URL not usable: ${e?.message}`);
+        }
+      }
+      if (documentsNeedsSave) {
+        candidate.markModified('documents');
+        await candidate.save();
+      }
+
       await Promise.all(
         candidate.documents.map(async (doc) => {
-          // If we have an S3 key, always prefer a fresh presigned URL
           if (doc.key) {
             try {
               const freshUrl = await generatePresignedDownloadUrl(doc.key, 7 * 24 * 3600);
               doc.url = freshUrl;
             } catch (error) {
               logger.error('Failed to regenerate URL for candidate document:', error);
-              // Fallback: keep existing URL (could be old S3 URL or API URL)
             }
           }
-          // If there's no key, we leave whatever URL is already stored
         })
       );
     }
@@ -1082,6 +1185,13 @@ const updateCandidateById = async (id, updateBody, currentUser) => {
           : String(prov).trim();
       sanitized.companyEmailProvider = ['gmail', 'outlook', 'unknown'].includes(p) ? p : inferCompanyEmailProvider(ce);
     }
+  }
+
+  if (sanitized.documents !== undefined) {
+    sanitized.documents = mergeDocumentsPreserveKeys(candidate.documents || [], sanitized.documents);
+  }
+  if (sanitized.salarySlips !== undefined) {
+    sanitized.salarySlips = mergeSalarySlipsPreserveKeys(candidate.salarySlips || [], sanitized.salarySlips);
   }
 
   // Update the candidate with new data
@@ -1540,6 +1650,29 @@ const getDocuments = async (candidateId, user) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Access denied');
   }
 
+  // Backfill missing keys from stored HTTPS S3 URLs (same as getCandidateById)
+  if (candidate.documents?.length) {
+    let needsSave = false;
+    for (let i = 0; i < candidate.documents.length; i += 1) {
+      const doc = candidate.documents[i];
+      if (doc.key) continue;
+      if (!doc.url) continue;
+      const extracted = extractS3KeyFromUrlString(doc.url);
+      if (!extracted) continue;
+      try {
+        await generatePresignedDownloadUrl(extracted, 120);
+        doc.key = extracted;
+        needsSave = true;
+      } catch (e) {
+        logger.warn(`getDocuments ${candidateId} doc ${i}: S3 key from URL not usable: ${e?.message}`);
+      }
+    }
+    if (needsSave) {
+      candidate.markModified('documents');
+      await candidate.save();
+    }
+  }
+
   // Return documents with direct S3 presigned URLs (like salary slips)
   const documents = await Promise.all(
     candidate.documents.map(async (doc, index) => {
@@ -1610,28 +1743,8 @@ const getDocumentDownloadUrl = async (candidateId, documentIndex, user) => {
   
   // Fallback: If no key but URL exists, try to extract key from URL
   if (document.url) {
-    // Try to extract S3 key from the stored URL
-    // Format examples:
-    // - https://bucket.s3.region.amazonaws.com/documents/user/file.pdf?params
-    // - https://s3.region.amazonaws.com/bucket/documents/user/file.pdf?params
-    // - https://vsc-files-storage.s3.ap-south-1.amazonaws.com/documents/.../file.pdf?params
-    
-    let extractedKey = null;
-    
-    // Pattern 1: bucket.s3.region.amazonaws.com/key
-    const pattern1 = /https?:\/\/[^/]+\.s3[.-][^/]+\.amazonaws\.com\/([^?]+)/;
-    const match1 = document.url.match(pattern1);
-    if (match1) {
-      extractedKey = decodeURIComponent(match1[1]);
-    } else {
-      // Pattern 2: s3.region.amazonaws.com/bucket/key
-      const pattern2 = /https?:\/\/s3[.-][^/]+\.amazonaws\.com\/[^/]+\/([^?]+)/;
-      const match2 = document.url.match(pattern2);
-      if (match2) {
-        extractedKey = decodeURIComponent(match2[1]);
-      }
-    }
-    
+    const extractedKey = extractS3KeyFromUrlString(document.url);
+
     // If we extracted a key, try to generate a fresh presigned URL
     if (extractedKey) {
       try {
@@ -1652,7 +1765,17 @@ const getDocumentDownloadUrl = async (candidateId, documentIndex, user) => {
         logger.warn(`Failed to generate presigned URL from extracted key "${extractedKey}": ${error.message}`);
       }
     }
-    
+
+    // Never return a self-referential API download URL as the "file" URL — it was often saved from dev
+    // (e.g. http://localhost:3002/v1/candidates/documents/.../download) and breaks for real users (ERR_CONNECTION_REFUSED).
+    // Without an S3 key we cannot produce a presigned URL; require re-upload.
+    if (/\/v1\/candidates\/documents\/[^/]+\/\d+\/download/i.test(document.url)) {
+      throw new ApiError(
+        httpStatus.BAD_REQUEST,
+        'This document is missing cloud storage metadata. Please re-upload it under Personal Information → Documents (or ask an admin to repair the file).'
+      );
+    }
+
     // Return stored URL as fallback (may be expired, but better than nothing)
     // This handles old documents that don't have keys stored
     return {
@@ -2823,6 +2946,18 @@ const updateUserAndCandidateForMe = async (userId, body) => {
       throw new ApiError(httpStatus.NOT_FOUND, 'Candidate not found');
     }
     if (Object.keys(candidatePayload).length > 0) {
+      if (candidatePayload.documents !== undefined) {
+        candidatePayload.documents = mergeDocumentsPreserveKeys(
+          candidate.documents || [],
+          candidatePayload.documents
+        );
+      }
+      if (candidatePayload.salarySlips !== undefined) {
+        candidatePayload.salarySlips = mergeSalarySlipsPreserveKeys(
+          candidate.salarySlips || [],
+          candidatePayload.salarySlips
+        );
+      }
       Object.assign(candidate, candidatePayload);
       if (candidatePayload.documents !== undefined) candidate.markModified('documents');
       if (candidatePayload.salarySlips !== undefined) candidate.markModified('salarySlips');

@@ -1,7 +1,6 @@
 import httpStatus from 'http-status';
 import Holiday from '../models/holiday.model.js';
 import ApiError from '../utils/ApiError.js';
-import pick from '../utils/pick.js';
 
 /**
  * Create a new holiday
@@ -9,7 +8,7 @@ import pick from '../utils/pick.js';
  * @param {Object} user - Current user
  * @returns {Promise<Holiday>}
  */
-const createHoliday = async (holidayBody, user) => {
+const createHoliday = async (holidayBody, _user) => {
   const { title, date, endDate, isActive } = holidayBody;
 
   const normalizedDate = new Date(date);
@@ -92,7 +91,7 @@ const getHolidayById = async (id) => {
  * @param {Object} user - Current user
  * @returns {Promise<Holiday>}
  */
-const updateHolidayById = async (holidayId, updateBody, user) => {
+const updateHolidayById = async (holidayId, updateBody, _user) => {
   const holiday = await getHolidayById(holidayId);
 
   if (updateBody.date) {
@@ -125,7 +124,7 @@ const updateHolidayById = async (holidayId, updateBody, user) => {
  * @param {Object} user - Current user
  * @returns {Promise<Holiday>}
  */
-const deleteHolidayById = async (holidayId, user) => {
+const deleteHolidayById = async (holidayId, _user) => {
   const holiday = await getHolidayById(holidayId);
   await Holiday.findByIdAndDelete(holidayId);
   return holiday;

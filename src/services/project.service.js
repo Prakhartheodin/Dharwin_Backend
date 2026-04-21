@@ -19,10 +19,20 @@ const isOwnerOrAdmin = async (user, resource) => {
   return String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id);
 };
 
+const PROJECT_LIST_LIMIT_MAX = 200;
+const sanitizeProjectWritePayload = (payload = {}) => {
+  const next = { ...payload };
+  // Server-managed metrics; derive from tasks only.
+  delete next.completedTasks;
+  delete next.totalTasks;
+  return next;
+};
+
 const createProject = async (createdById, payload) => {
+  const safePayload = sanitizeProjectWritePayload(payload);
   const project = await Project.create({
     createdBy: createdById,
-    ...payload,
+    ...safePayload,
   });
   await project.populate([
     { path: 'createdBy', select: 'name email' },
@@ -113,16 +123,18 @@ const queryProjects = async (filter, options) => {
   delete filter.userRoleIds;
   delete filter.userId;
 
-  const result = await Project.paginate(filter, options);
+  const limitRaw = parseInt(options?.limit, 10);
+  const safeLimit = Number.isFinite(limitRaw)
+    ? Math.max(1, Math.min(PROJECT_LIST_LIMIT_MAX, limitRaw))
+    : undefined;
+  const result = await Project.paginate(filter, { ...options, ...(safeLimit ? { limit: safeLimit } : {}) });
 
   if (result.results && result.results.length > 0) {
-    for (const doc of result.results) {
-      await doc.populate([
-        { path: 'createdBy', select: 'name email' },
-        { path: 'assignedTo', select: 'name email' },
-        { path: 'assignedTeams', select: 'name' },
-      ]);
-    }
+    await Project.populate(result.results, [
+      { path: 'createdBy', select: 'name email' },
+      { path: 'assignedTo', select: 'name email' },
+      { path: 'assignedTeams', select: 'name' },
+    ]);
   }
 
   return result;
@@ -167,7 +179,7 @@ const updateProjectById = async (id, updateBody, currentUser) => {
   }
 
   const oldAssigneeIds = new Set((project.assignedTo || []).map((u) => String(u._id || u)).filter(Boolean));
-  Object.assign(project, updateBody);
+  Object.assign(project, sanitizeProjectWritePayload(updateBody));
   await project.save();
 
   await project.populate([
@@ -201,13 +213,20 @@ const deleteProjectById = async (id, currentUser) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
 
-  const projectOid = new mongoose.Types.ObjectId(String(project._id));
-  await Promise.all([
-    Task.deleteMany({ projectId: projectOid }),
-    TaskBreakdownIdempotency.deleteMany({ projectId: projectOid }),
-    AssignmentRun.deleteMany({ projectId: projectOid }),
-  ]);
-  await project.deleteOne();
+  const session = await mongoose.startSession();
+  try {
+    await session.withTransaction(async () => {
+      const projectOid = new mongoose.Types.ObjectId(String(project._id));
+      await Promise.all([
+        Task.deleteMany({ projectId: projectOid }).session(session),
+        TaskBreakdownIdempotency.deleteMany({ projectId: projectOid }).session(session),
+        AssignmentRun.deleteMany({ projectId: projectOid }).session(session),
+      ]);
+      await Project.deleteOne({ _id: projectOid }).session(session);
+    });
+  } finally {
+    await session.endSession();
+  }
   return project;
 };
 

@@ -475,7 +475,8 @@ async function createRecord(body) {
   };
   const existing = await CallRecord.findOne({ executionId: doc.executionId }).lean();
   if (existing) {
-    const { executionId: _skip, ...rest } = doc;
+    const rest = { ...doc };
+    delete rest.executionId;
     return CallRecord.findOneAndUpdate({ executionId: doc.executionId }, { $set: rest }, { new: true }).lean();
   }
   return CallRecord.create(doc);

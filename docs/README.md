@@ -19,6 +19,7 @@ All Markdown documentation for this service is kept in this folder.
 | [RESET_PASSWORD_API.md](./RESET_PASSWORD_API.md) | Reset password |
 | [ROLES_API.md](./ROLES_API.md) | Roles |
 | [STUDENT_COURSES_API_FRONTEND.md](./STUDENT_COURSES_API_FRONTEND.md) | Student courses (frontend) |
+| [VOICE_AGENT_KB.md](./VOICE_AGENT_KB.md) | Voice agent knowledge base (RAG) |
 
 ## Operations, production & migrations
 
@@ -27,7 +28,7 @@ All Markdown documentation for this service is kept in this folder.
 | [DEPLOYMENT_URLS.md](./DEPLOYMENT_URLS.md) | Production URLs: backend + frontend env (emails, OAuth, `NEXT_PUBLIC_*`) |
 | [public-job-apply-production.md](./public-job-apply-production.md) | Public job apply: CORS, proxy body limits, env |
 | [LEGACY_ROLE_REMOVAL_MIGRATION.md](./LEGACY_ROLE_REMOVAL_MIGRATION.md) | Removing legacy roles safely |
-| [FIX_TASK_ASSIGNMENTS.md](./FIX_TASK_ASSIGNMENTS.md) | Task assignees vs candidate “My Projects” (restart / verify) |
+| [COMPANY_EMAIL_IT_ROLLOUT.md](./COMPANY_EMAIL_IT_ROLLOUT.md) | IT rollout for company-assigned Gmail/M365 mailboxes |
 
 ## QA
 
@@ -40,6 +41,8 @@ All Markdown documentation for this service is kept in this folder.
 | Document | Topic |
 |----------|--------|
 | [plans/2025-02-19-ats-analytics-design.md](./plans/2025-02-19-ats-analytics-design.md) | ATS analytics API & scoping design |
+| [plans/2026-04-13-001-fix-analytics-candidate-role-alignment-plan.md](./plans/2026-04-13-001-fix-analytics-candidate-role-alignment-plan.md) | Analytics/candidate-role alignment implementation plan |
+| [plans/2026-04-13-002-feat-candidate-user-lifecycle-sync-plan.md](./plans/2026-04-13-002-feat-candidate-user-lifecycle-sync-plan.md) | Candidate/user lifecycle sync plan |
 
 ## Frontend integration (this backend)
 

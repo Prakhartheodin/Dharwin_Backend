@@ -1,4 +1,3 @@
-import httpStatus from 'http-status';
 import catchAsync from '../utils/catchAsync.js';
 import * as certificateService from '../services/certificate.service.js';
 import * as activityLogService from '../services/activityLog.service.js';

@@ -36,7 +36,7 @@ const getToken = catchAsync(async (req, res) => {
     await chatService.ensureParticipant(conversationId, participantIdentity);
   }
 
-  const { token, isHost } = await livekitService.generateAccessToken({
+  const { token, isHost, canPublish } = await livekitService.generateAccessToken({
     roomName,
     participantName: name,
     participantIdentity,
@@ -50,6 +50,7 @@ const getToken = catchAsync(async (req, res) => {
     participantName: name,
     participantIdentity,
     isHost,
+    canPublish,
   });
 });
 
@@ -144,7 +145,7 @@ const getTokenPublic = catchAsync(async (req, res) => {
   const name = participantName?.trim() || 'Guest';
   const participantIdentity = bodyIdentity?.trim() || `guest-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-  const { token, isHost } = await livekitService.generateAccessToken({
+  const { token, isHost, canPublish } = await livekitService.generateAccessToken({
     roomName,
     participantName: name,
     participantIdentity,
@@ -157,7 +158,7 @@ const getTokenPublic = catchAsync(async (req, res) => {
     participantName: name,
     participantIdentity,
     isHost,
-    canPublish: isHost,
+    canPublish,
   });
 });
 

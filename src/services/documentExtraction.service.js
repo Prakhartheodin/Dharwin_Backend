@@ -1,7 +1,6 @@
 import mammoth from 'mammoth';
 import JSZip from 'jszip';
 import XLSX from 'xlsx';
-import logger from '../config/logger.js';
 
 /**
  * Extract raw text + embedded hyperlinks from PDF buffer.

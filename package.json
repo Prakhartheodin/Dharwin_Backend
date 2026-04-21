@@ -2,7 +2,6 @@
   "name": "node-template-server",
   "version": "1.0.0",
   "description": "Its an backend server template ",
-  "bin": "bin/createNodejsApp.js",
   "main": "src/index.js",
   "author": "Akshay Pareek",
   "engines": {
@@ -23,10 +22,7 @@
     "docker:livekit": "docker compose -f docker-compose.livekit-local.yml up -d",
     "docker:livekit:down": "docker compose -f docker-compose.livekit-local.yml down",
     "docker:livekit:full": "docker compose -f livekit/docker-compose.yml up -d",
-    "docker:livekit:full:down": "docker compose -f livekit/docker-compose.yml down",
-    "fix:attendance-tz": "echo \"Removed: scripts/ folder was deleted\" && exit 1",
-    "mongo:copy-atlas-to-local": "node scripts/copy-mongo-atlas-to-local.mjs",
-    "mongo:verify-migration": "node scripts/verify-mongo-migration.mjs"
+    "docker:livekit:full:down": "docker compose -f livekit/docker-compose.yml down"
   },
   "keywords": [
     "node",

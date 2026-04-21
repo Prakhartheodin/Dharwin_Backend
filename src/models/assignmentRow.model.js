@@ -27,7 +27,7 @@ const assignmentRowSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-assignmentRowSchema.index({ runId: 1, taskId: 1 });
+assignmentRowSchema.index({ runId: 1, taskId: 1 }, { unique: true });
 
 assignmentRowSchema.plugin(toJSON);
 

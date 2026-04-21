@@ -84,8 +84,23 @@ export async function getVideoDetails(videoIds) {
 }
 
 function parseDuration(iso) {
-  // PT1H2M30S -> minutes
-  const m = iso.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
-  if (!m) return 0;
-  return parseInt(m[1] || '0', 10) * 60 + parseInt(m[2] || '0', 10) + Math.ceil(parseInt(m[3] || '0', 10) / 60);
+  // ISO-8601 duration like PT1H2M30S -> total minutes (rounded up for seconds).
+  if (!iso || typeof iso !== 'string' || !iso.startsWith('PT')) return 0;
+  let hours = 0;
+  let minutes = 0;
+  let seconds = 0;
+  let num = '';
+  for (let i = 2; i < iso.length; i += 1) {
+    const ch = iso[i];
+    if (ch >= '0' && ch <= '9') {
+      num += ch;
+      continue;
+    }
+    const value = Number(num || '0');
+    if (ch === 'H') hours = value;
+    if (ch === 'M') minutes = value;
+    if (ch === 'S') seconds = value;
+    num = '';
+  }
+  return hours * 60 + minutes + Math.ceil(seconds / 60);
 }

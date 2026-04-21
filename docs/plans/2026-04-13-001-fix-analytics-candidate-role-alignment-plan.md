@@ -96,7 +96,7 @@ flowchart LR
 **Files:**
 
 - Modify: `uat.dharwin.backend/src/services/role.service.js`
-- Test: `uat.dharwin.backend/tests/unit/role.service.candidateRole.test.js` *(new — only if test runner is wired; see Verification)*
+- Test: create a unit test for candidate-role owner helper only if a dedicated backend test harness is added; otherwise validate via manual/API checks (see Verification).
 
 **Approach:**
 
@@ -130,7 +130,7 @@ flowchart LR
 **Files:**
 
 - Modify: `uat.dharwin.backend/src/services/candidate.service.js`
-- Test: `uat.dharwin.backend/tests/unit/role.service.candidateRole.test.js` *(covers helper; list behavior verified via integration or manual — see below)*
+- Test: validate helper/list behavior via integration or manual/API checks (see below) until a dedicated test harness is added.
 
 **Approach:**
 

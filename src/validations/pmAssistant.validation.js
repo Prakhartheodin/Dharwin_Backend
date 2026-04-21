@@ -21,6 +21,7 @@ const TASK_REQUIRED_SKILLS_MAX = 15;
 const TASK_BREAKDOWN_MAX_TASKS = 25;
 const FEEDBACK_MAX = 2000;
 const PRIOR_TASKS_MAX = 25;
+const ASSIGNMENT_ROW_NOTES_MAX = 500;
 
 const previewTaskBreakdown = {
   ...projectIdParam,
@@ -83,7 +84,7 @@ const patchAssignmentRun = {
           _id: Joi.string().custom(objectId).optional(),
           recommendedCandidateId: Joi.string().custom(objectId).allow(null).optional(),
           gap: Joi.boolean().optional(),
-          notes: Joi.string().trim().allow('').max(2000).optional(),
+          notes: Joi.string().trim().allow('').max(ASSIGNMENT_ROW_NOTES_MAX).optional(),
         })
       )
       .required(),

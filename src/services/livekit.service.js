@@ -99,7 +99,7 @@ const isParticipantHost = async (roomName, participantEmail) => {
  * @param {string} options.participantIdentity - Unique identity (usually user ID)
  * @param {string} options.participantEmail - Participant email (optional, for host check)
  * @param {boolean} options.forceFullPermissions - Force full permissions (for admitted participants)
- * @returns {Promise<{token: string, isHost: boolean}>} JWT token and host status
+ * @returns {Promise<{token: string, isHost: boolean, canPublish: boolean}>} JWT token and participant grants
  */
 const generateAccessToken = async ({ roomName, participantName, participantIdentity, participantEmail, forceFullPermissions = false }) => {
   logger.info('[LiveKit] generateAccessToken', { roomName, participantName, participantIdentity: participantIdentity || '(none)' });
@@ -119,16 +119,64 @@ const generateAccessToken = async ({ roomName, participantName, participantIdent
     throw new ApiError(httpStatus.GONE, 'This meeting has been cancelled');
   }
 
-  // Check if participant is a host, has been admitted, or forcing full permissions
+  // True host identity is based on meeting host/recruiter/creator email only.
+  const hostByEmail = participantEmail ? await isParticipantHost(roomName, participantEmail) : false;
+
+  // Enforce schedule window + capacity + guest policy for scheduled meetings.
+  if (meeting) {
+    const nowMs = Date.now();
+    const startMs = meeting.scheduledAt ? new Date(meeting.scheduledAt).getTime() : null;
+    const durationMinutes = Number(meeting.durationMinutes) > 0 ? Number(meeting.durationMinutes) : 60;
+    const endMs = startMs ? startMs + durationMinutes * 60 * 1000 : null;
+
+    if (startMs && nowMs < startMs && !hostByEmail) {
+      throw new ApiError(httpStatus.FORBIDDEN, 'Meeting has not started yet');
+    }
+    if (endMs && nowMs > endMs) {
+      throw new ApiError(httpStatus.GONE, 'Meeting has ended');
+    }
+
+    if (!meeting.allowGuestJoin && !hostByEmail) {
+      const emailLower = String(participantEmail || '').toLowerCase().trim();
+      const allowedEmails = new Set();
+      (meeting.hosts || []).forEach((h) => {
+        if (h?.email) allowedEmails.add(String(h.email).toLowerCase().trim());
+      });
+      (meeting.emailInvites || []).forEach((e) => {
+        if (e) allowedEmails.add(String(e).toLowerCase().trim());
+      });
+      if (meeting.candidate?.email) allowedEmails.add(String(meeting.candidate.email).toLowerCase().trim());
+      if (meeting.recruiter?.email) allowedEmails.add(String(meeting.recruiter.email).toLowerCase().trim());
+      if (!emailLower || !allowedEmails.has(emailLower)) {
+        throw new ApiError(httpStatus.FORBIDDEN, 'Guest join is disabled for this meeting');
+      }
+    }
+
+    if (!hostByEmail && roomService && Number(meeting.maxParticipants) > 0) {
+      try {
+        const participantsInRoom = await roomService.listParticipants(roomName);
+        const alreadyJoined = participantsInRoom.some((p) => p.identity === (participantIdentity || participantName));
+        if (!alreadyJoined && participantsInRoom.length >= Number(meeting.maxParticipants)) {
+          throw new ApiError(httpStatus.CONFLICT, 'Meeting is full (max participants reached)');
+        }
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+      }
+    }
+  }
+
+  // Check if participant has been admitted from waiting room or forcing full permissions.
   const roomAdmitted = admittedParticipants.get(roomName);
   const dbAdmitted =
     participantIdentity &&
     Array.isArray(meeting?.admittedIdentities) &&
     meeting.admittedIdentities.includes(participantIdentity);
   const isAdmitted = roomAdmitted?.has(participantIdentity) || dbAdmitted || false;
-  const isHost = forceFullPermissions || isAdmitted || (participantEmail ? await isParticipantHost(roomName, participantEmail) : false);
+  const approvalRequired = Boolean(meeting?.requireApproval);
+  const canPublish = forceFullPermissions || hostByEmail || isAdmitted || (meeting ? !approvalRequired : false);
+  const isHost = hostByEmail;
 
-  logger.info('[LiveKit] Token grants', { roomName, isHost, isAdmitted, forceFullPermissions });
+  logger.info('[LiveKit] Token grants', { roomName, isHost, canPublish, isAdmitted, forceFullPermissions });
 
   const token = new AccessToken(apiKey, apiSecret, {
     identity: participantIdentity || participantName,
@@ -136,20 +184,19 @@ const generateAccessToken = async ({ roomName, participantName, participantIdent
     ttl: '6h', // Explicit TTL to avoid premature expiry and reconnects
   });
 
-  // Grant permissions based on host status
-  // Hosts get full permissions, non-hosts can only subscribe (waiting room)
+  // Grant permissions based on host/admission/approval rules.
   token.addGrant({
     room: roomName,
     roomJoin: true,
-    canPublish: isHost, // Only hosts can publish initially
+    canPublish, // Hosts, admitted users, or meetings with requireApproval=false
     canSubscribe: true, // All participants can subscribe (see/hear)
-    canPublishData: isHost, // Only hosts can publish data initially
+    canPublishData: canPublish,
     canUpdateOwnMetadata: true,
   });
 
   const jwt = await token.toJwt();
   logger.info('[LiveKit] Token generated successfully', { roomName, isHost });
-  return { token: jwt, isHost };
+  return { token: jwt, isHost, canPublish };
 };
 
 /**

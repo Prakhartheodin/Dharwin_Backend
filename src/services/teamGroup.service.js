@@ -6,6 +6,7 @@ import ApiError from '../utils/ApiError.js';
 import { userIsAdmin } from '../utils/roleHelpers.js';
 
 const escapeRegex = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const TEAM_GROUP_LIST_LIMIT_MAX = 200;
 
 const isOwnerOrAdmin = async (user, resource) => {
   if (!resource) return false;
@@ -25,7 +26,7 @@ const createTeamGroup = async (createdById, payload) => {
 
 const queryTeamGroups = async (filter, options) => {
   if (filter.search) {
-    const searchRegex = new RegExp(filter.search, 'i');
+    const searchRegex = new RegExp(escapeRegex(filter.search), 'i');
     filter.name = searchRegex;
     delete filter.search;
   }
@@ -65,7 +66,9 @@ const queryTeamGroups = async (filter, options) => {
   }
 
   const sort = options.sortBy || '-createdAt';
-  const limit = options.limit && parseInt(options.limit, 10) > 0 ? parseInt(options.limit, 10) : 100;
+  const limit = options.limit && parseInt(options.limit, 10) > 0
+    ? Math.min(TEAM_GROUP_LIST_LIMIT_MAX, parseInt(options.limit, 10))
+    : 100;
   const page = options.page && parseInt(options.page, 10) > 0 ? parseInt(options.page, 10) : 1;
   const skip = (page - 1) * limit;
 

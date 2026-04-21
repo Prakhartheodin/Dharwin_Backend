@@ -1,7 +1,6 @@
 import httpStatus from 'http-status';
 import Shift from '../models/shift.model.js';
 import ApiError from '../utils/ApiError.js';
-import pick from '../utils/pick.js';
 
 const createSingleShift = async (shiftBody) => {
   const { name, description, timezone, startTime, endTime, isActive } = shiftBody;
@@ -23,7 +22,7 @@ const createSingleShift = async (shiftBody) => {
   return shift;
 };
 
-const createShift = async (shiftBody, user) => {
+const createShift = async (shiftBody, _user) => {
   if (Array.isArray(shiftBody)) {
     if (shiftBody.length === 0) throw new ApiError(httpStatus.BAD_REQUEST, 'At least one shift is required');
     if (shiftBody.length > 100) throw new ApiError(httpStatus.BAD_REQUEST, 'Cannot create more than 100 shifts at once');
@@ -58,7 +57,7 @@ const getShiftById = async (id) => {
   return shift;
 };
 
-const updateShiftById = async (shiftId, updateBody, user) => {
+const updateShiftById = async (shiftId, updateBody, _user) => {
   const shift = await getShiftById(shiftId);
   const startTime = updateBody.startTime ?? shift.startTime;
   const endTime = updateBody.endTime ?? shift.endTime;
@@ -74,7 +73,7 @@ const updateShiftById = async (shiftId, updateBody, user) => {
   return shift;
 };
 
-const deleteShiftById = async (shiftId, user) => {
+const deleteShiftById = async (shiftId, _user) => {
   const shift = await getShiftById(shiftId);
   await Shift.findByIdAndDelete(shiftId);
   return shift;

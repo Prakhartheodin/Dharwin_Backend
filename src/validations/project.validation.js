@@ -25,8 +25,6 @@ const createProject = {
       assignedTeams: Joi.array().items(Joi.string().custom(objectId)).optional(),
       tags: Joi.array().items(Joi.string().trim()).optional(),
       attachments: Joi.array().items(Joi.string().uri()).optional(),
-      completedTasks: Joi.number().integer().min(0).optional(),
-      totalTasks: Joi.number().integer().min(0).optional(),
     })
     .required(),
 };
@@ -39,7 +37,7 @@ const getProjects = {
     /** When true, restrict to projects created by the current user (even for admins). */
     mine: Joi.alternatives().try(Joi.boolean(), Joi.string().valid('true', 'false', '1', '0')).optional(),
     sortBy: Joi.string().optional(),
-    limit: Joi.number().integer().optional(),
+    limit: Joi.number().integer().min(1).max(200).optional(),
     page: Joi.number().integer().optional(),
   }),
 };
@@ -72,8 +70,6 @@ const updateProject = {
       assignedTeams: Joi.array().items(Joi.string().custom(objectId)).optional(),
       tags: Joi.array().items(Joi.string().trim()).optional(),
       attachments: Joi.array().items(Joi.string().uri()).optional(),
-      completedTasks: Joi.number().integer().min(0).optional(),
-      totalTasks: Joi.number().integer().min(0).optional(),
     })
     .min(1),
 };

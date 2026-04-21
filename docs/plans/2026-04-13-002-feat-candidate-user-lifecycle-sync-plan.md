@@ -43,8 +43,8 @@ Align backend behavior with stated lifecycle rules: provisioning via `ensureCand
 
 ## Problem Frame
 
-- Today, [`deleteCandidateById`](uat.dharwin.backend/src/services/candidate.service.js) disables the user but also **removes** the Candidate role from `roleIds`, which contradicts “only disable in user list” and makes role-based reporting drift.
-- Provisioning is **intended** via [`createUser`](uat.dharwin.backend/src/services/user.service.js) / [`updateUserById`](uat.dharwin.backend/src/services/user.service.js) → `ensureCandidateProfileForUser`, but failures are **swallowed**, allowing **User-with-role-but-no-Candidate** drift (observed as count mismatches elsewhere in the product).
+- Today, [`deleteCandidateById`](../../src/services/candidate.service.js) disables the user but also **removes** the Candidate role from `roleIds`, which contradicts “only disable in user list” and makes role-based reporting drift.
+- Provisioning is **intended** via [`createUser`](../../src/services/user.service.js) / [`updateUserById`](../../src/services/user.service.js) → `ensureCandidateProfileForUser`, but failures are **swallowed**, allowing **User-with-role-but-no-Candidate** drift (observed as count mismatches elsewhere in the product).
 
 ---
 
@@ -68,10 +68,10 @@ Align backend behavior with stated lifecycle rules: provisioning via `ensureCand
 
 ### Relevant Code and Patterns
 
-- [`uat.dharwin.backend/src/services/candidate.service.js`](uat.dharwin.backend/src/services/candidate.service.js) — `deleteCandidateById`, `ensureCandidateProfileForUser`.
-- [`uat.dharwin.backend/src/services/user.service.js`](uat.dharwin.backend/src/services/user.service.js) — `createUser`, `updateUserById`, `deleteUserById`.
-- [`uat.dharwin.backend/src/models/user.model.js`](uat.dharwin.backend/src/models/user.model.js) — `status` enum includes `disabled`.
-- [`uat.dharwin.frontend/app/(components)/(contentlayout)/settings/users/page.tsx`](uat.dharwin.frontend/app/(components)/(contentlayout)/settings/users/page.tsx) — displays/filters `disabled`.
+- [`src/services/candidate.service.js`](../../src/services/candidate.service.js) — `deleteCandidateById`, `ensureCandidateProfileForUser`.
+- [`src/services/user.service.js`](../../src/services/user.service.js) — `createUser`, `updateUserById`, `deleteUserById`.
+- [`src/models/user.model.js`](../../src/models/user.model.js) — `status` enum includes `disabled`.
+- `uat.dharwin.frontend/app/(components)/(contentlayout)/settings/users/page.tsx` — displays/filters `disabled`.
 
 ### Institutional Learnings
 
@@ -163,7 +163,7 @@ stateDiagram-v2
 **Files:**
 
 - Modify: `uat.dharwin.backend/src/services/candidate.service.js`
-- Test: `uat.dharwin.backend/tests/integration/candidate-delete-lifecycle.test.js` *(create if test harness exists; else manual checklist in Verification)*
+- Test: add an integration test for candidate delete lifecycle only if a dedicated backend test harness is added; otherwise use the manual checklist in Verification.
 
 **Approach:** Delete only the `getRoleByName` / `roleIds.filter` block; preserve `isActive`, `status`, `Token.deleteMany`.
 
@@ -229,7 +229,7 @@ stateDiagram-v2
 
 **Files:**
 
-- Create: `uat.dharwin.backend/scripts/repair-candidate-profiles.js` *(path illustrative)*
+- Optional one-off backfill (if needed): implement in-app or as a temporary maintenance route; no checked-in script.
 
 **Test scenarios:**
 

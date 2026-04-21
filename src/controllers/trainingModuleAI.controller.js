@@ -3,7 +3,6 @@ import { fetchCoverImage } from '../services/imageSearch.service.js';
 import { extractRawTextFromFile, extractDocumentTitle, extractStructuredDataFromExcel } from '../services/documentExtraction.service.js';
 import { generateModuleContent, refineModuleWithChat, suggestTopicAndDescription, generateBlogForModule, generateQuizForModule, generateEssayForModule, enhanceQuizWithAI, enhanceEssayWithAI, getPlaylistOutlineFromTitle, generateFullPlaylistFromTitleAndConfig } from '../services/moduleOpenAI.service.js';
 import { createTrainingModule, getTrainingModuleById } from '../services/trainingModule.service.js';
-import TrainingModule from '../models/trainingModule.model.js';
 import logger from '../config/logger.js';
 
 function sendSSE(res, step, status, message, data) {
@@ -81,6 +80,7 @@ const ESSAY_SECTION_HEADER = /(?:📖|Long-Answer|Long\s*-\s*Answer|Practice\s+Q
 /** Check if first line of a numbered block is an answer sub-point (e.g. "1. int (Integer):") not a question. */
 function looksLikeAnswerSubpoint(firstLine) {
   const t = (firstLine || '').trim();
+  // eslint-disable-next-line security/detect-unsafe-regex
   return /^\w+\s*\([^)]+\)\s*:?\s*/.test(t) || /^[A-Z][a-z]+(\s*\([^)]+\))?\s*[—\-:]\s*/.test(t);
 }
 
@@ -99,6 +99,7 @@ function extractEssaysFromSection(sectionText, opts = {}) {
   const { includeExpectedAnswer = true } = opts;
   const essays = [];
   const section = (sectionText || '').match(ESSAY_SECTION_HEADER)?.[0] || sectionText || '';
+  // eslint-disable-next-line security/detect-unsafe-regex
   const re = /(?:^|\n)\s*([1-9]\d*)\.\s+([^\n]+(?:\n(?![1-9]\d*\.\s)[^\n]*)*)/g;
   let m;
   for (;;) {
@@ -261,7 +262,7 @@ function extractBlogFromModulePart(part) {
 }
 
 /** Strip emoji/icon characters and surrounding whitespace/punctuation from a header line. */
-const HEADER_JUNK_RE = /[\u{1F4D6}\u{1F4DD}\u{1F4FA}\u{1F3AC}\u{25B6}\u{2705}\u{1F4D6}-\u{1F4FF}\u{1F300}-\u{1F5FF}\u{2600}-\u{27BF}:\s\t|▶✅📖📝📺🎬]/gu;
+const HEADER_JUNK_RE = /[\u{1F4D6}\u{1F4DD}\u{1F4FA}\u{1F3AC}\u{25B6}\u{2705}\u{1F4D6}-\u{1F4FF}\u{1F300}-\u{1F5FF}\u{2600}-\u{27BF}: \t|▶✅📖📝📺🎬]/gu;
 
 /** Normalize section headers in extracted text so extraction works reliably. */
 function normalizeDocumentText(text) {
@@ -271,7 +272,9 @@ function normalizeDocumentText(text) {
     { re: /Blogs?/i, label: 'Blogs' },
     { re: /Video\s+Resources?/i, label: 'Videos' },
     { re: /Videos?/i, label: 'Videos' },
+    // eslint-disable-next-line security/detect-unsafe-regex
     { re: /(?:Module\s+)?Quiz(?:zes?)?/i, label: 'Quizzes' },
+    // eslint-disable-next-line security/detect-unsafe-regex
     { re: /Long-?[Aa]nswer\s+(?:Practice\s+)?[Qq]uestions?/i, label: 'Long-answer questions' },
   ];
   const lines = text.split(/\n/);
@@ -435,7 +438,6 @@ function extractDocumentForDisplay(rawText) {
   }
   const documentTitle = extractDocumentTitle(rawText);
   const normalizedText = normalizeDocumentText(rawText);
-  const modules = extractContentByModuleFromDocument(normalizedText);
 
   const displayModules = [];
   let textForModules = normalizedText;
@@ -579,7 +581,7 @@ function mapExtractedByModuleToPlaylistFormat(extractedByModule) {
   });
 }
 
-function inferSectionsFromPlaylist(playlist, expectedCount) {
+function inferSectionsFromPlaylist(playlist) {
   const normalize = (item) =>
     item?.contentType === 'video' ? { ...item, contentType: 'youtube-link' } : item;
   const sections = [];
