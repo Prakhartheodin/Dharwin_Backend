@@ -30,31 +30,20 @@ function normalizeStatus(status) {
 
 async function runCallHistorySync() {
   try {
-    logger.debug('Starting scheduled Call Records (Bolna) sync...');
-
-    const backfillResult = await callRecordService.backfillFromBolna({ maxPages: 2 });
-    if (backfillResult.backfilled > 0) {
-      logger.debug(`Backfilled ${backfillResult.backfilled} new call record(s) from Bolna`);
-    }
+    await callRecordService.backfillFromBolna({ maxPages: 2 });
 
     const recordsToSync = await callRecordService.findCallRecordsToSyncForCron({ limit: 1000 });
     if (!recordsToSync.length) {
-      logger.debug('No call records to sync');
       return;
     }
 
     const executionIds = [...new Set(recordsToSync.map((r) => r.executionId).filter(Boolean))];
     const limitIds = executionIds.slice(0, 100);
 
-    let syncedCount = 0;
-    let updatedCount = 0;
-    let errorCount = 0;
-
     for (const executionId of limitIds) {
       try {
         const result = await bolnaService.getExecutionDetails(executionId);
         if (!result.success || !result.details) {
-          errorCount += 1;
           continue;
         }
         const executionData = result.details;
@@ -65,7 +54,6 @@ async function runCallHistorySync() {
             status: 'expired',
             errorMessage: executionData.error_message,
           });
-          syncedCount += 1;
           continue;
         }
         const data = executionData.data || executionData.execution || {};
@@ -167,25 +155,15 @@ async function runCallHistorySync() {
 
             if (Object.keys(updateData).length > 0) {
               await callRecordService.updateCallRecordByExecutionId(executionId, updateData);
-              updatedCount += 1;
             }
           }
         }
-        syncedCount += 1;
       } catch (err) {
-        errorCount += 1;
         logger.error(`Failed to sync execution ${executionId}: ${err.message}`);
       }
     }
 
-    const filled = await callRecordService.fillMissingBusinessNameFromJobs(50);
-    if (filled.updated > 0) {
-      logger.debug(`Filled business name for ${filled.updated} call record(s) from Jobs`);
-    }
-
-    logger.debug(
-      `Call history sync completed: ${syncedCount} executions synced, ${updatedCount} records updated, ${errorCount} errors`
-    );
+    await callRecordService.fillMissingBusinessNameFromJobs(50);
   } catch (err) {
     logger.error(`Error in scheduled Call Records sync: ${err.message}`);
   }

@@ -72,7 +72,6 @@ async function syncCallRecordsFromBolna() {
           status: 'expired',
           errorMessage: details.error_message,
         });
-        logger.debug(`Job call record ${executionId} marked expired (Bolna 404)`);
         continue;
       }
 
