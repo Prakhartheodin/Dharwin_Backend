@@ -11,9 +11,6 @@ import ApiError from '../utils/ApiError.js';
 import { buildOfferLetterPdfBuffer, formatStartDate } from './offerLetterPdf.service.js';
 import { uploadPdfBuffer, getObjectBufferByKey } from './fileStorage.service.js';
 import { getLetterDefaultsForPositionTitle } from '../config/offerLetterRoleDefaults.js';
-import offerLetterLogger from '../utils/offerLetterLogger.js';
-
-const log = offerLetterLogger;
 
 const STATUS_VALUES = ['Draft', 'Sent', 'Under Negotiation', 'Accepted', 'Rejected'];
 
@@ -662,56 +659,27 @@ const deleteOfferById = async (id, currentUser) => {
 };
 
 const generateOfferLetter = async (id, currentUser, letterPayload = null) => {
-  const offerId = String(id);
-  const totalDone = log.timer(offerId, 'total');
-
-  const loadDone = log.timer(offerId, 'db_load');
   const offer = await getOfferById(id, currentUser);
-  loadDone();
-
   if (!offer) {
-    log.warn(offerId, 'not_found');
-    totalDone({ result: 'aborted', reason: 'not_found' });
     throw new ApiError(httpStatus.NOT_FOUND, 'Offer not found');
   }
 
   const hasPayload =
     letterPayload && typeof letterPayload === 'object' && Object.keys(letterPayload).length > 0;
   if (hasPayload) {
-    const patchDone = log.timer(offerId, 'apply_patch');
     await applyOfferLetterPatchForGenerate(offer, letterPayload);
-    patchDone({ fieldCount: Object.keys(letterPayload).length });
   }
 
-  let ctx;
-  try {
-    const ctxDone = log.timer(offerId, 'build_context');
-    ctx = validateAndBuildLetterContext(offer);
-    ctxDone();
-  } catch (err) {
-    log.error(offerId, 'validation_failed', { message: err.message });
-    totalDone({ result: 'aborted', reason: 'validation_failed' });
-    throw err;
-  }
-
+  const ctx = validateAndBuildLetterContext(offer);
   const newHash = letterPdfContentHashFromCtx(ctx);
   if (offer.offerLetterKey && offer.offerLetterHash === newHash) {
-    log.info(offerId, 'hash_hit', { key: offer.offerLetterKey });
-    totalDone({ result: 'cache_hit' });
     return offer;
   }
-  log.info(offerId, 'hash_miss', { previousKey: offer.offerLetterKey || null });
 
-  const pdfDone = log.timer(offerId, 'pdf_build');
   const buf = await buildOfferLetterPdfBuffer(ctx);
-  pdfDone({ sizeBytes: buf.length });
-
   const userId = currentUser?.id ?? currentUser?._id;
-  const uploadDone = log.timer(offerId, 's3_upload');
   const { key } = await uploadPdfBuffer(userId, buf, 'offer-letters/');
-  uploadDone({ key });
 
-  const saveDone = log.timer(offerId, 'db_save');
   const updated = await Offer.findByIdAndUpdate(
     id,
     {
@@ -721,14 +689,10 @@ const generateOfferLetter = async (id, currentUser, letterPayload = null) => {
     },
     { new: true }
   ).populate(OFFER_LETTER_POPULATE);
-  saveDone();
 
   if (!updated) {
-    log.error(offerId, 'db_save_not_found');
-    totalDone({ result: 'aborted', reason: 'db_save_not_found' });
     throw new ApiError(httpStatus.NOT_FOUND, 'Offer not found');
   }
-  totalDone({ result: 'generated', key });
   return updated;
 };
 

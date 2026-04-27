@@ -13,9 +13,6 @@ import {
   getLetterDefaultsForTitle,
 } from '../services/offer.service.js';
 import { enhanceOfferLetterRoles } from '../services/moduleOpenAI.service.js';
-import offerLetterLogger from '../utils/offerLetterLogger.js';
-
-const olLog = offerLetterLogger;
 
 const create = catchAsync(async (req, res) => {
   const { jobApplicationId, ...payload } = req.body;
@@ -61,18 +58,10 @@ const generateLetter = catchAsync(async (req, res) => {
 });
 
 const downloadLetterFile = catchAsync(async (req, res) => {
-  const offerId = String(req.params.offerId);
-  const done = olLog.timer(offerId, 'download_proxy');
-  try {
-    const { buffer, filename } = await getOfferLetterFileBuffer(offerId, req.user);
-    done({ sizeBytes: buffer.length });
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
-    res.send(buffer);
-  } catch (err) {
-    olLog.error(offerId, 'download_failed', { message: err.message });
-    throw err;
-  }
+  const { buffer, filename } = await getOfferLetterFileBuffer(req.params.offerId, req.user);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+  res.send(buffer);
 });
 
 const enhanceRoles = catchAsync(async (req, res) => {
