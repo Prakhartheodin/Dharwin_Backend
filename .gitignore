@@ -14,3 +14,9 @@ coverage
 # Local webhook payload backups (LiveKit Egress)
 recordings/
 
+# graphify AST cache (regeneratable)
+graphify-out/cache/
+
+# local scratch / exports (do not commit)
+referral_hits.csv
+
