@@ -43,7 +43,7 @@ const offerSchema = new mongoose.Schema(
     },
     status: {
       type: String,
-      enum: ['Draft', 'Sent', 'Under Negotiation', 'Accepted', 'Rejected'],
+      enum: ['Draft', 'Active', 'Sent', 'Under Negotiation', 'Accepted', 'Rejected'],
       default: 'Draft',
       index: true,
     },

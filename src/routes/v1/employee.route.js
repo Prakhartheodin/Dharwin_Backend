@@ -66,6 +66,9 @@ router
   .get(auth(), employeeController.getMyCandidate)
   .patch(auth(), validate(employeeValidation.updateMyCandidate), employeeController.updateMyCandidate);
 
+/** Job matches for current user's candidate profile — auth only, no candidates.read required. */
+router.get('/me/matching-jobs', auth(), employeeController.getMyMatchingJobsHandler);
+
 /** All Agent-role users for ATS candidate filter (checklist) — candidates.read */
 router.get(
   '/agents',
@@ -241,5 +244,12 @@ router
 router
   .route('/public/candidate/:candidateId')
   .get(employeeController.getPublicProfile);
+
+/** Job fit score: compare candidate skills against a job's skillRequirements */
+router.get(
+  '/:candidateId/job-fit',
+  ...canRead,
+  employeeController.getJobFitHandler
+);
 
 export default router;

@@ -26,12 +26,29 @@ function getOpenAIClient() {
   return new OpenAI({ apiKey });
 }
 
+const VALID_LEVELS = new Set(['Beginner', 'Intermediate', 'Advanced', 'Expert']);
+
+function parseSkillItem(item) {
+  if (typeof item === 'string') return { name: item.trim().replace(/\s+/g, ' '), level: null };
+  if (item && typeof item === 'object') {
+    const name = String(item.name ?? item.skill ?? '').trim().replace(/\s+/g, ' ');
+    const rawLevel = String(item.level ?? '');
+    const normalized = rawLevel.charAt(0).toUpperCase() + rawLevel.slice(1).toLowerCase();
+    const level = VALID_LEVELS.has(normalized) ? normalized : null;
+    return { name, level };
+  }
+  return { name: '', level: null };
+}
+
 /**
  * Flatten categorized skill arrays into Employee.skill schema rows (dedupe by case-insensitive name).
+ * Accepts both string[] and {name, level}[] per bucket.
  * @param {Record<string, unknown>} parsed - Parsed JSON from model
- * @returns {{ skills: Array<{ name: string; level: string; category?: string }>; buckets: Record<string, string[]> }}
+ * @param {{ source?: string }} [opts]
+ * @returns {{ skills: Array<{ name: string; level: string; category?: string; source?: string }>; buckets: Record<string, string[]> }}
  */
-export function categorizedJsonToEmployeeSkills(parsed) {
+export function categorizedJsonToEmployeeSkills(parsed, opts = {}) {
+  const source = opts.source || 'manual';
   const pairs = [
     ['technical', 'Technical'],
     ['soft', 'Soft Skills'],
@@ -43,7 +60,7 @@ export function categorizedJsonToEmployeeSkills(parsed) {
 
   /** @type {Record<string, string[]>} */
   const buckets = {};
-  /** @type {Array<{ name: string; level: string; category?: string }>} */
+  /** @type {Array<{ name: string; level: string; category?: string; source?: string }>} */
   const skills = [];
   const seen = new Set();
 
@@ -52,9 +69,7 @@ export function categorizedJsonToEmployeeSkills(parsed) {
     const arr = Array.isArray(raw) ? raw : [];
     buckets[key] = [];
     for (const item of arr) {
-      const name = String(item ?? '')
-        .trim()
-        .replace(/\s+/g, ' ');
+      const { name, level } = parseSkillItem(item);
       if (!name) continue;
       buckets[key].push(name);
       const lower = name.toLowerCase();
@@ -62,8 +77,9 @@ export function categorizedJsonToEmployeeSkills(parsed) {
       seen.add(lower);
       skills.push({
         name,
-        level: 'Intermediate',
+        level: level || 'Intermediate',
         category: categoryLabel,
+        source,
       });
     }
   }
@@ -82,7 +98,7 @@ export function categorizedJsonToEmployeeSkills(parsed) {
 export async function extractSkillsFromResumeBuffer(buffer, mimeType, filename) {
   let rawText = '';
   try {
-    rawText = await extractRawTextFromFile(buffer, mimeType || '', filename || 'resume.pdf');
+    rawText = await extractRawTextFromFile(buffer, mimeType || '', filename || 'resume.pdf', { skipYoutubeLinks: true });
   } catch (e) {
     logger.warn('[resumeSkillsExtract] extractRawTextFromFile failed', { message: e?.message });
     throw new ApiError(
@@ -109,7 +125,9 @@ export async function extractSkillsFromResumeBuffer(buffer, mimeType, filename) 
   const model = DEFAULT_MODEL;
 
   const system = `You extract structured skills from resume text. Reply with a single JSON object only (no markdown).
-Keys: name (string, candidate display name or empty), technical (string[]), soft (string[]), tools (string[]), languages (string[]), domains (string[]), certifications (string[]).
+Keys: name (string, candidate display name or empty), technical, soft, tools, languages, domains, certifications.
+Each bucket is an array of objects: {name: string, level: string}.
+level must be one of: Beginner, Intermediate, Advanced, Expert — infer from resume context (years of experience, explicit claims, project depth).
 technical = programming languages, frameworks, databases, cloud, DevOps, ML/data stacks.
 soft = interpersonal skills only.
 tools = named products (Jira, Salesforce, VS Code).
@@ -146,7 +164,7 @@ Normalize duplicates; Title Case proper nouns; empty arrays allowed.`;
     throw new ApiError(httpStatus.BAD_GATEWAY, 'Could not parse AI response.');
   }
 
-  const out = categorizedJsonToEmployeeSkills(parsed);
+  const out = categorizedJsonToEmployeeSkills(parsed, { source: 'resume' });
   logger.info('[resumeSkillsExtract] extracted skills count=%s model=%s', out.skills.length, completion.model || model);
   return out;
 }
@@ -199,7 +217,9 @@ export async function recommendSkillsForJobRole(roleTitle, currentSkillsRaw = []
   const model = DEFAULT_MODEL;
 
   const system = `You help employees grow toward a target job role. Reply with ONE JSON object only (no markdown).
-Keys: technical (string[]), soft (string[]), tools (string[]), languages (string[]), domains (string[]), certifications (string[]).
+Keys: technical, soft, tools, languages, domains, certifications.
+Each bucket is an array of objects: {name: string, level: string}.
+level is the target proficiency to reach: Beginner, Intermediate, Advanced, or Expert — pick based on what this role typically requires.
 technical = stacks still missing or weak for this role vs what they already have.
 soft = interpersonal skills worth developing for this role.
 tools = products/platforms to learn.
@@ -209,7 +229,7 @@ certifications = credentials worth pursuing.
 
 IMPORTANT: The user lists skills the employee ALREADY has. Recommend ONLY additional skills they still need to develop for the target role. Do NOT repeat or trivially rename existing skills (match names loosely; ignore case). If they already cover the role well, use mostly empty arrays with a few high-impact gaps only.
 
-Emit roughly 8–24 NEW distinct skill names total across buckets (fewer if redundant). Empty arrays allowed. Each array item is one concise skill name.`;
+Emit roughly 8–24 NEW distinct skill names total across buckets (fewer if redundant). Empty arrays allowed.`;
 
   const user = `Target job role:\n${trimmed}\n\nSkills the employee already has:\n${skillsLines}\n\nWhat additional skills should they develop for this role? JSON only.`;
 
@@ -239,7 +259,7 @@ Emit roughly 8–24 NEW distinct skill names total across buckets (fewer if redu
     throw new ApiError(httpStatus.BAD_GATEWAY, 'Could not parse AI response.');
   }
 
-  const out = categorizedJsonToEmployeeSkills(parsed);
+  const out = categorizedJsonToEmployeeSkills(parsed, { source: 'ai_recommended' });
   const existingLower = new Set(currentSkills.map((s) => String(s.name).trim().toLowerCase()).filter(Boolean));
   const filteredSkills = out.skills.filter(
     (sk) => !existingLower.has(String(sk.name || '').trim().toLowerCase())

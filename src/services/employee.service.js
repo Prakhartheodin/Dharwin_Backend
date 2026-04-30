@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import mongoose from 'mongoose';
 import validator from 'validator';
 import Employee from '../models/employee.model.js';
+import Job from '../models/job.model.js';
 import Student from '../models/student.model.js';
 import User from '../models/user.model.js';
 import Token from '../models/token.model.js';
@@ -457,13 +458,20 @@ const buildAdvancedFilter = (filter) => {
     }
   }
   
-  // Skills matching - use MongoDB text index for faster search
+  // Skills matching — 'all' mode uses per-skill regex $and; default uses text index OR search
   if (filter.skills && filter.skills.length > 0) {
     const skillNames = (Array.isArray(filter.skills) ? filter.skills : [filter.skills])
       .map((s) => String(s).trim())
       .filter(Boolean);
     if (skillNames.length > 0) {
-      mongoFilter.$text = { $search: skillNames.join(' ') };
+      if (filter.skillMatchMode === 'all') {
+        const andClauses = skillNames.map((s) => ({
+          'skills.name': { $regex: s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), $options: 'i' },
+        }));
+        mongoFilter.$and = [...(mongoFilter.$and || []), ...andClauses];
+      } else {
+        mongoFilter.$text = { $search: skillNames.join(' ') };
+      }
     }
   }
   
@@ -3135,6 +3143,144 @@ export {
   syncPhoneFromUserToCandidate,
   getCandidateByOwnerForMe,
   getResignStatusByOwnerId,
+  getJobFit,
+  matchJobsForCandidate,
 };
 
+const LEVEL_RANK = { Beginner: 1, Intermediate: 2, Advanced: 3, Expert: 4 };
+
+/**
+ * Calculate job fit for a candidate against a job's skillRequirements.
+ * Falls back to skillTags when skillRequirements is empty.
+ * @param {string} candidateId
+ * @param {string} jobId
+ * @returns {Promise<{ matchedSkills: Array, missingSkills: Array, fitScore: number, fitLabel: string }>}
+ */
+async function getJobFit(candidateId, jobId) {
+  const [candidate, job] = await Promise.all([
+    Employee.findById(candidateId).select('skills').lean(),
+    Job.findById(jobId).select('skillRequirements skillTags title').lean(),
+  ]);
+
+  if (!candidate) throw new ApiError(httpStatus.NOT_FOUND, 'Candidate not found.');
+  if (!job) throw new ApiError(httpStatus.NOT_FOUND, 'Job not found.');
+
+  const employeeSkillMap = new Map(
+    (candidate.skills || []).map((s) => [String(s.name).toLowerCase(), s])
+  );
+
+  // Use structured requirements when available; fall back to skillTags as required skills
+  const requirements = Array.isArray(job.skillRequirements) && job.skillRequirements.length > 0
+    ? job.skillRequirements
+    : (job.skillTags || []).map((t) => ({ name: t, required: true }));
+
+  if (requirements.length === 0) {
+    return { matchedSkills: [], missingSkills: [], fitScore: 100, fitLabel: 'No requirements' };
+  }
+
+  const matchedSkills = [];
+  const missingSkills = [];
+
+  for (const req of requirements) {
+    const reqName = String(req.name || '').toLowerCase();
+    const emp = employeeSkillMap.get(reqName);
+    if (emp) {
+      const meetsLevel = !req.level || (LEVEL_RANK[emp.level] || 0) >= (LEVEL_RANK[req.level] || 0);
+      matchedSkills.push({
+        name: req.name,
+        required: req.required !== false,
+        employeeLevel: emp.level,
+        requiredLevel: req.level || null,
+        meetsLevel,
+      });
+    } else {
+      missingSkills.push({
+        name: req.name,
+        required: req.required !== false,
+        requiredLevel: req.level || null,
+      });
+    }
+  }
+
+  const requiredTotal = requirements.filter((r) => r.required !== false).length;
+  const requiredMatched = matchedSkills.filter((s) => s.required && s.meetsLevel).length;
+  const fitScore = requiredTotal > 0 ? Math.round((requiredMatched / requiredTotal) * 100) : 100;
+
+  let fitLabel = 'Poor fit';
+  if (fitScore >= 80) fitLabel = 'Strong fit';
+  else if (fitScore >= 60) fitLabel = 'Good fit';
+  else if (fitScore >= 40) fitLabel = 'Partial fit';
+
+  return { matchedSkills, missingSkills, fitScore, fitLabel, jobTitle: job.title };
+}
+
+/**
+ * Find and score all active jobs against a candidate's skills.
+ * @param {string} candidateId
+ * @param {{ limit?: number, minScore?: number }} opts
+ */
+async function matchJobsForCandidate(candidateId, { limit = 10, minScore = 0 } = {}) {
+  const candidate = await Employee.findById(candidateId).select('skills').lean();
+  if (!candidate) throw new ApiError(httpStatus.NOT_FOUND, 'Candidate not found.');
+
+  const skills = candidate.skills || [];
+  if (skills.length === 0) return { matches: [], candidateSkillCount: 0, totalJobsScored: 0 };
+
+  const employeeSkillMap = new Map(skills.map((s) => [String(s.name).toLowerCase(), s]));
+
+  const jobs = await Job.find({ status: 'Active' })
+    .select('title organisation location jobType skillRequirements skillTags experienceLevel')
+    .lean();
+
+  const scored = [];
+  for (const job of jobs) {
+    const requirements =
+      Array.isArray(job.skillRequirements) && job.skillRequirements.length > 0
+        ? job.skillRequirements
+        : (job.skillTags || []).map((t) => ({ name: t, required: true }));
+
+    if (requirements.length === 0) continue;
+
+    const matchedSkills = [];
+    const missingSkills = [];
+
+    for (const req of requirements) {
+      const reqName = String(req.name || '').toLowerCase();
+      const emp = employeeSkillMap.get(reqName);
+      if (emp) {
+        const meetsLevel = !req.level || (LEVEL_RANK[emp.level] || 0) >= (LEVEL_RANK[req.level] || 0);
+        matchedSkills.push({ name: req.name, required: req.required !== false, employeeLevel: emp.level, requiredLevel: req.level || null, meetsLevel });
+      } else {
+        missingSkills.push({ name: req.name, required: req.required !== false, requiredLevel: req.level || null });
+      }
+    }
+
+    const requiredTotal = requirements.filter((r) => r.required !== false).length;
+    const requiredMatched = matchedSkills.filter((s) => s.required && s.meetsLevel).length;
+    const fitScore = requiredTotal > 0 ? Math.round((requiredMatched / requiredTotal) * 100) : 100;
+
+    if (fitScore < minScore) continue;
+
+    let fitLabel = 'Poor fit';
+    if (fitScore >= 80) fitLabel = 'Strong fit';
+    else if (fitScore >= 60) fitLabel = 'Good fit';
+    else if (fitScore >= 40) fitLabel = 'Partial fit';
+
+    scored.push({
+      jobId: job._id,
+      title: job.title,
+      company: job.organisation?.name || '',
+      location: job.location,
+      jobType: job.jobType,
+      experienceLevel: job.experienceLevel || null,
+      fitScore,
+      fitLabel,
+      matchedSkills,
+      missingSkills,
+    });
+  }
+
+  scored.sort((a, b) => b.fitScore - a.fitScore);
+  return { matches: scored.slice(0, limit), candidateSkillCount: skills.length, totalJobsScored: scored.length };
+}
 

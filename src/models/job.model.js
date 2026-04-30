@@ -33,8 +33,18 @@ const jobSchema = new mongoose.Schema(
       trim: true,
     },
 
-    // Skill Tags
+    // Skill Tags (flat list for quick filtering)
     skillTags: [{ type: String, trim: true }],
+
+    // Structured skill requirements with level and required flag
+    skillRequirements: [
+      {
+        name: { type: String, required: true, trim: true },
+        level: { type: String, enum: ['Beginner', 'Intermediate', 'Advanced', 'Expert'] },
+        required: { type: Boolean, default: true },
+        _id: false,
+      },
+    ],
 
     // Additional Fields
     salaryRange: {

@@ -11,9 +11,22 @@ import { authLoginLimiter, authStrictFlowLimiter } from '../../middlewares/rateL
 
 const router = express.Router();
 
+const RESUME_ALLOWED_MIMES = new Set([
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+]);
+
 const resumeSkillsUpload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 15 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const ext = (file.originalname || '').toLowerCase();
+    if (RESUME_ALLOWED_MIMES.has(file.mimetype) || ext.endsWith('.pdf') || ext.endsWith('.docx')) {
+      cb(null, true);
+    } else {
+      cb(new Error('Upload a PDF or DOCX resume.'));
+    }
+  },
 });
 
 router.post(
@@ -59,6 +72,7 @@ router.post(
   validate(authValidation.recommendSkillsByRole),
   authController.recommendSkillsByRole
 );
+router.get('/me/skill-recommendations', auth(), authController.listSkillRecommendations);
 router.post('/me/send-verification-email', auth(), authStrictFlowLimiter, authController.sendMyVerificationEmail);
 router.get('/my-permissions', auth(), authController.getMyPermissions);
 router.post('/impersonate', auth(), requireAdministratorRole(), validate(authValidation.impersonate), authController.impersonate);

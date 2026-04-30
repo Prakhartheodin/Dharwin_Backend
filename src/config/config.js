@@ -89,6 +89,10 @@ const envVarsSchema = Joi.object()
         'Max voice call length in seconds (sent as max_call_duration_seconds on POST /call when > 0). Set 0 to omit. Also set the same limit in Bolna Call tab for job + candidate agents.'
       ),
 
+    // Apollo.io — HR contact enrichment for External Jobs
+    APOLLO_IO_API_KEY: Joi.string().optional().description('Apollo.io Master API key for people search and enrichment'),
+    APOLLO_WEBHOOK_SECRET: Joi.string().optional().description('Random secret token in the Apollo webhook URL path to prevent spoofing'),
+
     // Microsoft / Outlook OAuth
     MICROSOFT_CLIENT_ID: Joi.string().optional().description('Microsoft OAuth client ID (for Outlook)'),
     MICROSOFT_CLIENT_SECRET: Joi.string().optional().description('Microsoft OAuth client secret'),
@@ -337,6 +341,10 @@ const config = {
     apiBase: envVars.BOLNA_API_BASE || 'https://api.bolna.ai',
     /** Applied to every outbound call; mirror in Bolna dashboard Call tab for each agent. */
     maxCallDurationSeconds: envVars.BOLNA_MAX_CALL_DURATION_SECONDS,
+  },
+  apollo: {
+    apiKey: envVars.APOLLO_IO_API_KEY || '',
+    webhookSecret: (envVars.APOLLO_WEBHOOK_SECRET || '').trim(),
   },
   rateLimit: {
     authWindowMinutes: envVars.RATE_LIMIT_AUTH_WINDOW_MINUTES ?? 15,

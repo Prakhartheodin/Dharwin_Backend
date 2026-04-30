@@ -572,6 +572,29 @@ const importJobsFromExcel = async (fileBuffer, createdById) => {
 };
 
 // Job Template CRUD
+const jobTemplateVisibilityScope = (userId) => ({
+  $or: [{ visibility: { $ne: 'private' } }, { createdBy: userId }],
+});
+
+const mergeJobTemplateFilter = (filter, userId) => {
+  const scope = jobTemplateVisibilityScope(userId);
+  if (!filter || Object.keys(filter).length === 0) {
+    return scope;
+  }
+  return { $and: [filter, scope] };
+};
+
+/** True if the user may read or use this template (list row, GET, create job from template). */
+const canUserAccessJobTemplate = async (template, user) => {
+  if (!template || !user) return false;
+  if (user.platformSuperUser) return true;
+  if (template.visibility !== 'private') return true;
+  const ownerId = String(template.createdBy?._id || template.createdBy);
+  const uid = String(user.id || user._id);
+  if (ownerId === uid) return true;
+  return userIsAdmin(user);
+};
+
 const createJobTemplate = async (createdById, payload) => {
   const template = await JobTemplate.create({
     createdBy: createdById,
@@ -581,34 +604,16 @@ const createJobTemplate = async (createdById, payload) => {
 };
 
 const queryJobTemplates = async (filter, options) => {
-  const canSeeAllTenantJobs = await userCanViewAllJobsForListing({
-    roleIds: filter.userRoleIds || [],
-    platformSuperUser: filter.platformSuperUser,
-  });
+  const platformSuperUser = filter.platformSuperUser;
+  const userId = filter.userId;
+
   delete filter.platformSuperUser;
-  if (!canSeeAllTenantJobs && filter.userId) {
-    const userId = filter.userId;
-    const userFilter = { createdBy: userId };
-
-    delete filter.userRoleIds;
-    delete filter.userId;
-
-    const finalFilter = { ...filter, ...userFilter };
-    const result = await JobTemplate.paginate(finalFilter, options);
-
-    if (result.results && result.results.length > 0) {
-      for (const doc of result.results) {
-        await doc.populate([{ path: 'createdBy', select: 'name email' }]);
-      }
-    }
-
-    return result;
-  }
-
   delete filter.userRoleIds;
   delete filter.userId;
 
-  const result = await JobTemplate.paginate(filter, options);
+  const finalFilter = platformSuperUser ? { ...filter } : mergeJobTemplateFilter(filter, userId);
+
+  const result = await JobTemplate.paginate(finalFilter, options);
 
   if (result.results && result.results.length > 0) {
     for (const doc of result.results) {
@@ -713,10 +718,15 @@ const applyCandidateToJob = async (jobId, candidateId, appliedById, currentUser)
   return application;
 };
 
-const createJobFromTemplate = async (templateId, createdById, jobData) => {
+const createJobFromTemplate = async (templateId, createdById, jobData, currentUser) => {
   const template = await getJobTemplateById(templateId);
   if (!template) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Job template not found');
+  }
+
+  const allowed = await canUserAccessJobTemplate(template, currentUser);
+  if (!allowed) {
+    throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
 
   const finalJobData = {
@@ -1141,6 +1151,7 @@ export {
   getJobTemplateById,
   updateJobTemplateById,
   deleteJobTemplateById,
+  canUserAccessJobTemplate,
   createJobFromTemplate,
   applyCandidateToJob,
   isOwnerOrAdmin,

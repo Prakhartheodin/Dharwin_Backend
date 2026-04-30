@@ -41,6 +41,8 @@ import {
   assignShiftToCandidates,
   listAgentUsersForAssignment,
   getAgentAssignmentSummary,
+  getJobFit,
+  matchJobsForCandidate,
 } from '../services/employee.service.js';
 import {
   listReferralLeads,
@@ -1649,4 +1651,29 @@ const importExcel = catchAsync(async (req, res) => {
 });
 
 export { importExcel };
+
+const getJobFitHandler = catchAsync(async (req, res) => {
+  const { candidateId } = req.params;
+  const { jobId } = req.query;
+  if (!jobId) {
+    throw new ApiError(httpStatus.BAD_REQUEST, 'jobId query param is required.');
+  }
+  const result = await getJobFit(candidateId, jobId);
+  res.send(result);
+});
+
+export { getJobFitHandler };
+
+const getMyMatchingJobsHandler = catchAsync(async (req, res) => {
+  const candidate = await getCandidateByOwnerForMe(req.user.id);
+  if (!candidate) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Candidate profile not found.');
+  }
+  const limit = Math.min(parseInt(req.query.limit, 10) || 10, 50);
+  const minScore = parseInt(req.query.minScore, 10) || 0;
+  const result = await matchJobsForCandidate(candidate._id ?? candidate.id, { limit, minScore });
+  res.send(result);
+});
+
+export { getMyMatchingJobsHandler };
 

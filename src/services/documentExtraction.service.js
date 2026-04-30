@@ -7,9 +7,11 @@ import XLSX from 'xlsx';
  * Uses pdfjs-dist to get page text and link annotations.
  * YouTube links found on each page are injected inline so they associate
  * with the correct module when the text is later split by module headers.
+ * @param {Buffer} buffer
+ * @param {{ skipYoutubeLinks?: boolean }} [opts]
  */
 /* eslint-disable import/no-extraneous-dependencies */
-async function extractTextFromPdfBuffer(buffer) {
+async function extractTextFromPdfBuffer(buffer, opts = {}) {
   const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const data = new Uint8Array(buffer);
   const doc = await pdfjsLib.getDocument({ data }).promise;
@@ -23,16 +25,18 @@ async function extractTextFromPdfBuffer(buffer) {
     const tc = await page.getTextContent();
     let text = tc.items.map((item) => item.str + (item.hasEOL ? '\n' : '')).join('');
 
-    const annotations = await page.getAnnotations();
-    const ytLinks = annotations
-      .filter((a) => a.subtype === 'Link' && a.url)
-      .map((a) => a.url)
-      .filter((u) => /youtube\.com\/watch\?v=|youtu\.be\//i.test(u) && !/youtube\.com\/playlist/i.test(u));
+    if (!opts.skipYoutubeLinks) {
+      const annotations = await page.getAnnotations();
+      const ytLinks = annotations
+        .filter((a) => a.subtype === 'Link' && a.url)
+        .map((a) => a.url)
+        .filter((u) => /youtube\.com\/watch\?v=|youtu\.be\//i.test(u) && !/youtube\.com\/playlist/i.test(u));
 
-    const uniquePageLinks = [...new Set(ytLinks)];
-    if (uniquePageLinks.length) {
-      text += '\n' + uniquePageLinks.join('\n');
-      allYtLinks.push(...uniquePageLinks);
+      const uniquePageLinks = [...new Set(ytLinks)];
+      if (uniquePageLinks.length) {
+        text += '\n' + uniquePageLinks.join('\n');
+        allYtLinks.push(...uniquePageLinks);
+      }
     }
 
     pageChunks.push(text);
@@ -57,13 +61,17 @@ async function extractTextFromPdfBuffer(buffer) {
   return fullText;
 }
 
-/** Extract raw text from DOCX buffer. */
-async function extractTextFromDocxBuffer(buffer) {
+/**
+ * Extract raw text from DOCX buffer.
+ * @param {Buffer} buffer
+ * @param {{ skipYoutubeLinks?: boolean }} [opts]
+ */
+async function extractTextFromDocxBuffer(buffer, opts = {}) {
   const input = { buffer };
   const [htmlResult, rawResult, zipResult] = await Promise.all([
     mammoth.convertToHtml(input).catch(() => null),
     mammoth.extractRawText(input).catch(() => null),
-    JSZip.loadAsync(buffer).catch(() => null),
+    opts.skipYoutubeLinks ? Promise.resolve(null) : JSZip.loadAsync(buffer).catch(() => null),
   ]);
 
   let text;
@@ -87,7 +95,7 @@ async function extractTextFromDocxBuffer(buffer) {
   }
 
   let youtubeUrls = [];
-  if (zipResult) {
+  if (!opts.skipYoutubeLinks && zipResult) {
     const relsFile = zipResult.file('word/_rels/document.xml.rels');
     if (relsFile) {
       const relsText = await relsFile.async('text');
@@ -408,18 +416,19 @@ export function extractDocumentTitle(rawText) {
  * @param {Buffer} buffer - File buffer
  * @param {string} mimeType - MIME type
  * @param {string} filename - Original filename
+ * @param {{ skipYoutubeLinks?: boolean }} [opts] - Pass skipYoutubeLinks:true for resume parsing
  * @returns {Promise<string>} Raw extracted text
  */
-export async function extractRawTextFromFile(buffer, mimeType, filename) {
+export async function extractRawTextFromFile(buffer, mimeType, filename, opts = {}) {
   const ext = filename?.split('.').pop()?.toLowerCase() || '';
   if (mimeType === 'application/pdf' || ext === 'pdf') {
-    return extractTextFromPdfBuffer(buffer);
+    return extractTextFromPdfBuffer(buffer, opts);
   }
   if (
     mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
     ext === 'docx'
   ) {
-    return extractTextFromDocxBuffer(buffer);
+    return extractTextFromDocxBuffer(buffer, opts);
   }
   if (
     mimeType === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' ||

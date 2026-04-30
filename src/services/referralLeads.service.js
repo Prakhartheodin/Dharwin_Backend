@@ -12,7 +12,7 @@ import * as activityLogService from './activityLog.service.js';
 import { ActivityActions, EntityTypes } from '../config/activityLog.js';
 import { logReferralEvent } from './referralAttribution.service.js';
 import logger from '../config/logger.js';
-import { userIsSalesAgent } from '../utils/roleHelpers.js';
+import { userIsSalesAgent, userIsAdmin, userIsAgent } from '../utils/roleHelpers.js';
 
 const escapeRegex = (value) => String(value ?? '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -724,6 +724,9 @@ export const getReferralLeadsStats = async (req) => {
   const match = await buildReferralLeadsMatch({ user: req.user, canSeeAll, query: q });
   const matchGlobalTop = buildGlobalTopReferrerMatch(q);
 
+  /** Org-wide “top referrer” is sensitive; only Administrator, internal Agent, or platform super user. */
+  const canSeeOrgReferrerLeaderboard = (await userIsAdmin(req.user)) || (await userIsAgent(req.user));
+
   const ownerStages = referralLeadsRequireExistingOwnerStages();
 
   const [totalArr, byStatus, topRef] = await Promise.all([
@@ -733,13 +736,15 @@ export const getReferralLeadsStats = async (req) => {
       ...ownerStages,
       { $group: { _id: '$referralPipelineStatus', count: { $sum: 1 } } },
     ]),
-    Employee.aggregate([
-      { $match: matchGlobalTop },
-      ...ownerStages,
-      { $group: { _id: '$referredByUserId', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-      { $limit: 1 },
-    ]),
+    canSeeOrgReferrerLeaderboard
+      ? Employee.aggregate([
+          { $match: matchGlobalTop },
+          ...ownerStages,
+          { $group: { _id: '$referredByUserId', count: { $sum: 1 } } },
+          { $sort: { count: -1 } },
+          { $limit: 1 },
+        ])
+      : Promise.resolve([]),
   ]);
 
   const totalAgg = totalArr[0]?.c ?? 0;

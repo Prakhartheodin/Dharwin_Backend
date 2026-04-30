@@ -7,6 +7,14 @@ const jobTemplateSchema = new mongoose.Schema(
     title: { type: String, required: true, trim: true },
     jobDescription: { type: String, required: true, trim: true },
 
+    /** public: all users with job template access; private: only creator (and admins). */
+    visibility: {
+      type: String,
+      enum: ['public', 'private'],
+      default: 'public',
+      index: true,
+    },
+
     // Ownership
     createdBy: {
       type: mongoose.Schema.Types.ObjectId,

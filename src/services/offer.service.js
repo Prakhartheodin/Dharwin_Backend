@@ -853,8 +853,10 @@ const generateOfferLetter = async (id, currentUser, letterPayload = null) => {
   const fresh = await getOfferById(id, currentUser);
   validateAndBuildLetterContext(fresh);
 
+  const statusUpdate = fresh.status === 'Draft' ? { $set: { status: 'Active' } } : {};
   await Offer.findByIdAndUpdate(id, {
     $unset: { offerLetterKey: 1, offerLetterUrl: 1, offerLetterHash: 1, offerLetterGeneratedAt: 1 },
+    ...statusUpdate,
   });
 
   return getOfferById(id, currentUser);

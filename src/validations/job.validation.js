@@ -167,6 +167,7 @@ const createJobTemplate = {
       'any.required': 'Job description is required',
       'string.empty': 'Job description cannot be empty',
     }),
+    visibility: Joi.string().valid('public', 'private').optional(),
   }).required(),
 };
 
@@ -194,6 +195,7 @@ const updateJobTemplate = {
     .keys({
       title: Joi.string().optional().trim(),
       jobDescription: Joi.string().optional().trim(),
+      visibility: Joi.string().valid('public', 'private').optional(),
     })
     .min(1),
 };

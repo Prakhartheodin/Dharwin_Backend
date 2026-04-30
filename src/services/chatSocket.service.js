@@ -134,16 +134,24 @@ const emitNewMessage = async (conversationId, message) => {
   if (payload._id && !payload.id) payload.id = payload._id.toString();
   if (!payload.createdAt && message.createdAt) payload.createdAt = message.createdAt;
 
+  // Emit to conversation room (users actively viewing the conversation)
   io.to(`conversation:${conversationId}`).emit('new_message', payload);
 
   try {
     const participantIds = await chatService.getConversationParticipantIds(conversationId);
     if (participantIds && participantIds.length) {
+      const senderStr = String(payload.sender?._id || payload.sender?.id || '');
       participantIds.forEach((uid) => {
-        io.to(`user:${uid}`).emit('conversation_updated', {
+        const uidStr = String(uid);
+        // conversation_updated to all participants (sidebar badge/preview)
+        io.to(`user:${uidStr}`).emit('conversation_updated', {
           conversationId,
           lastMessage: { content: payload.content, sender: payload.sender?.name || '', createdAt: payload.createdAt },
         });
+        // new_message to non-sender user rooms — fires toast even when recipient not on chat page
+        if (uidStr !== senderStr) {
+          io.to(`user:${uidStr}`).emit('new_message', payload);
+        }
       });
     }
   } catch (err) {

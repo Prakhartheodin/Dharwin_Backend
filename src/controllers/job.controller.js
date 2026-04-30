@@ -17,6 +17,7 @@ import {
   updateJobTemplateById,
   deleteJobTemplateById,
   createJobFromTemplate,
+  canUserAccessJobTemplate,
   applyCandidateToJob,
   applyJobReferralFromRef,
 } from '../services/job.service.js';
@@ -216,11 +217,9 @@ const getTemplate = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Job template not found');
   }
 
-  const fullVisibility = await userCanViewAllJobsForListing(req.user);
-  const isOwner =
-    String(template.createdBy?._id || template.createdBy) === String(req.user.id || req.user._id);
-  if (!fullVisibility && !isOwner) {
-    throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
+  const allowed = await canUserAccessJobTemplate(template, req.user);
+  if (!allowed) {
+    throw new ApiError(httpStatus.NOT_FOUND, 'Job template not found');
   }
 
   res.send(template);
@@ -240,7 +239,7 @@ const removeTemplate = catchAsync(async (req, res) => {
 const createFromTemplate = catchAsync(async (req, res) => {
   const createdById = req.user.id || req.user._id;
   const { templateId } = req.params;
-  const job = await createJobFromTemplate(templateId, createdById, req.body);
+  const job = await createJobFromTemplate(templateId, createdById, req.body, req.user);
   res.status(httpStatus.CREATED).send(job);
 });
 

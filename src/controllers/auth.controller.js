@@ -37,6 +37,7 @@ import User from '../models/user.model.js';
 import { getMyPermissionsForFrontend } from '../services/permission.service.js';
 import { pickUserDisplayForActivityLog } from '../utils/activityLogSubject.util.js';
 import Impersonation from '../models/impersonation.model.js';
+import SkillRecommendation from '../models/skillRecommendation.model.js';
 import { generatePresignedDownloadUrl } from '../config/s3.js';
 import {
   applyReferralToCandidate,
@@ -736,11 +737,37 @@ const extractSkillsFromResume = catchAsync(async (req, res) => {
 
 /**
  * POST /auth/me/recommend-skills-by-role — JSON body `{ role, currentSkills? }`.
- * Uses OPENAI_API_KEY; sends target role + employee's existing skills only; returns NEW skills to develop (same shape as resume extraction).
+ * Persists result to SkillRecommendation (fire-and-forget; never fails the response).
  */
 const recommendSkillsByRole = catchAsync(async (req, res) => {
   const result = await recommendSkillsForJobRole(req.body?.role, req.body?.currentSkills);
   res.send(result);
+
+  // Persist recommendation history (non-blocking)
+  try {
+    const candidate = await getCandidateByOwnerForMe(req.user.id);
+    if (candidate?._id && result.skills?.length) {
+      await SkillRecommendation.create({
+        employeeId: candidate._id,
+        targetRole: String(req.body?.role || '').trim().slice(0, 500),
+        skills: result.skills,
+        buckets: result.buckets || {},
+      });
+    }
+  } catch (_) {
+    // never surface persistence errors to caller
+  }
+});
+
+/** GET /auth/me/skill-recommendations — list saved recommendations, newest first. */
+const listSkillRecommendations = catchAsync(async (req, res) => {
+  const candidate = await getCandidateByOwnerForMe(req.user.id);
+  if (!candidate) return res.send({ recommendations: [] });
+  const recs = await SkillRecommendation.find({ employeeId: candidate._id })
+    .sort({ createdAt: -1 })
+    .limit(20)
+    .lean();
+  res.send({ recommendations: recs });
 });
 
 /**
@@ -859,6 +886,7 @@ export {
   updateMeWithCandidate,
   extractSkillsFromResume,
   recommendSkillsByRole,
+  listSkillRecommendations,
   getMyPermissions,
   impersonate,
   stopImpersonation,
