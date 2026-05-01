@@ -59,6 +59,7 @@ import cannedResponseRoute from './cannedResponse.route.js';
 import fileStorageRoute from './fileStorage.route.js';
 import supportCameraInviteRoute from './supportCameraInvite.route.js';
 import hrmWebRtcRoute from './hrmWebRtc.route.js';
+import chatAssistantRoute from './chatAssistant.route.js';
 
 /**
  * RBAC inventory: Most mounted routers use requirePermissions (see each *.route.js).
@@ -309,6 +310,10 @@ const defaultRoutes = [
   {
     path: '/platform/hrm-webrtc',
     route: hrmWebRtcRoute,
+  },
+  {
+    path: '/chat-assistant',
+    route: chatAssistantRoute,
   },
 ];
 

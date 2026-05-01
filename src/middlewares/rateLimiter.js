@@ -58,6 +58,15 @@ const jobsBrowseLimiter = rateLimit({
   message: { message: 'Too many requests. Please try again shortly.' },
 });
 
+const chatAssistantLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  keyGenerator: (req) => (req.user && req.user.id ? String(req.user.id) : req.ip),
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { message: 'Too many requests. Please try again in a minute.' },
+});
+
 export {
   authLoginLimiter,
   authStrictFlowLimiter,
@@ -65,5 +74,6 @@ export {
   publicWriteLimiter,
   attendancePunchLimiter,
   jobsBrowseLimiter,
+  chatAssistantLimiter,
 };
 
