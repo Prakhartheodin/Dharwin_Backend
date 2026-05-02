@@ -53,7 +53,8 @@ const resolveStaleRecording = async (recording, egressClient) => {
     logger.warn('[Recording scheduler] Force-resolving active egress older than 8h', { egressId });
   }
 
-  const endedAt = egressInfo.endedAt ? new Date(Number(egressInfo.endedAt) * 1000) : now;
+  const endedAtMs = egressInfo.endedAt ? Number(egressInfo.endedAt) * 1000 : NaN;
+  const endedAt = Number.isFinite(endedAtMs) && endedAtMs > 0 ? new Date(endedAtMs) : now;
 
   const fileResults = egressInfo.fileResults || egressInfo.file_results || egressInfo.fileResultsList;
   const filePath =

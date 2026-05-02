@@ -93,9 +93,8 @@ const receiveLiveKitEgressWebhook = catchAsync(async (req, res) => {
     }
 
     // endedAt: Unix timestamp (seconds) from LiveKit
-    const completedAt = info.endedAt
-      ? new Date(Number(info.endedAt) * 1000)
-      : new Date();
+    const endedAtMs = info.endedAt ? Number(info.endedAt) * 1000 : NaN;
+    const completedAt = Number.isFinite(endedAtMs) && endedAtMs > 0 ? new Date(endedAtMs) : new Date();
 
     // Extract actual uploaded file path — try all known field name variants
     const fileResults = info.fileResults || info.file_results || info.fileResultsList;
