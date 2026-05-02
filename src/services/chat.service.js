@@ -660,7 +660,7 @@ const endCallByRoom = async (roomName, userId) => {
   });
   const conversationId = call.conversation?.toString?.();
   if (roomName.startsWith('chat-')) {
-    await livekitService.disconnectAllParticipants(roomName).catch(() => {});
+    await livekitService.deleteInterviewRoom(roomName).catch(() => {});
   }
   return { success: true, conversationId, roomName };
 };

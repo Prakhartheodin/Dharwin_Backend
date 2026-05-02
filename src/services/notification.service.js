@@ -8,25 +8,24 @@ import { getFrontendBaseUrl } from '../utils/emailLinks.js';
  * Maintainer inventory (triggers, types, prefs, idempotency): `docs/NOTIFICATION_TRIGGERS.md`.
  */
 
-/** Maps notification `type` to User.notificationPreferences keys (Settings → notifications). */
-export const NOTIFICATION_TYPE_TO_PREF_KEY = {
-  leave: 'leaveUpdates',
-  task: 'taskAssignments',
-  job_application: 'applicationUpdates',
-  offer: 'offerUpdates',
-  meeting: 'meetingInvitations',
-  meeting_reminder: 'meetingReminders',
-  certificate: 'certificates',
-  course: 'courseUpdates',
-  recruiter: 'recruiterUpdates',
-  support_ticket: 'supportTicketUpdates',
+/** Maps notification `type` to User.notificationPreferences keys per channel. */
+export const NOTIFICATION_PREF_KEYS = {
+  leave:            { email: 'leaveUpdates',         inApp: 'leaveUpdatesInApp' },
+  task:             { email: 'taskAssignments',       inApp: 'taskAssignmentsInApp' },
+  job_application:  { email: 'applicationUpdates',   inApp: 'applicationUpdatesInApp' },
+  offer:            { email: 'offerUpdates',          inApp: 'offerUpdatesInApp' },
+  meeting:          { email: 'meetingInvitations',    inApp: 'meetingInvitationsInApp' },
+  meeting_reminder: { email: 'meetingReminders',      inApp: 'meetingRemindersInApp' },
+  certificate:      { email: 'certificates',          inApp: 'certificatesInApp' },
+  course:           { email: 'courseUpdates',         inApp: 'courseUpdatesInApp' },
+  recruiter:        { email: 'recruiterUpdates',      inApp: 'recruiterUpdatesInApp' },
+  support_ticket:   { email: 'supportTicketUpdates',  inApp: 'supportTicketUpdatesInApp' },
 };
 
-export const isNotificationEmailAllowedForPreferences = (notificationType, notificationPreferences) => {
-  const prefs = notificationPreferences || {};
-  const prefKey = NOTIFICATION_TYPE_TO_PREF_KEY[notificationType];
-  if (!prefKey) return true;
-  return prefs[prefKey] !== false;
+export const isChannelAllowed = (type, channel, prefs) => {
+  const keys = NOTIFICATION_PREF_KEYS[type];
+  if (!keys) return true;
+  return (prefs || {})[keys[channel]] !== false;
 };
 
 /**
@@ -39,7 +38,7 @@ export const shouldSendNotificationEmailToAddress = async (toEmail, notification
     .select('notificationPreferences')
     .lean();
   if (!user) return true;
-  return isNotificationEmailAllowedForPreferences(notificationType, user.notificationPreferences);
+  return isChannelAllowed(notificationType, 'email', user.notificationPreferences);
 };
 
 /** Append absolute frontend URL for a relative or absolute `link` (for plain-text emails). */
@@ -105,7 +104,7 @@ export const pushToSse = (userId, data) => {
  * @returns {Promise<Notification>}
  */
 export const createNotification = async (userId, options) => {
-  const { type = 'general', title, message, link = null } = options;
+  const { type = 'general', title, message, link = null, triggeredBy = null, relatedEntity = null } = options;
   const doc = await Notification.create({
     user: userId,
     type,
@@ -113,6 +112,8 @@ export const createNotification = async (userId, options) => {
     message,
     link,
     read: false,
+    ...(triggeredBy && { triggeredBy }),
+    ...(relatedEntity?.type && { relatedEntity }),
   });
   const payload = doc.toJSON ? doc.toJSON() : doc;
   pushToSse(userId, { type: 'notification', notification: payload });
@@ -195,13 +196,18 @@ export const notifyByEmail = async (email, options) => {
   const normalized = String(email).trim().toLowerCase();
   const user = await User.findOne({ email: normalized }).select('_id email notificationPreferences').lean();
   if (!user?._id) return null;
-  const doc = await createNotification(user._id, { type, title, message, link });
+
+  let doc = null;
+  if (isChannelAllowed(type, 'inApp', user.notificationPreferences)) {
+    doc = await createNotification(user._id, { type, title, message, link });
+  }
 
   if (emailBody?.subject && (emailBody.text || emailBody.html)) {
-    if (!isNotificationEmailAllowedForPreferences(type, user.notificationPreferences)) {
+    if (!isChannelAllowed(type, 'email', user.notificationPreferences)) {
       return doc;
     }
     try {
+      // eslint-disable-next-line import/no-cycle
       const { queueEmail } = await import('./email.service.js');
       queueEmail(
         user.email,
@@ -228,32 +234,29 @@ export const notifyByEmail = async (email, options) => {
  */
 export const notify = async (userId, options) => {
   const { type, title, message, link, email: emailOptions } = options;
-  const doc = await createNotification(userId, { type, title, message, link });
+  const user = await User.findById(userId).select('email notificationPreferences').lean();
 
-  if (emailOptions && emailOptions.subject && (emailOptions.text || emailOptions.html)) {
-    let to;
-    try {
-      const user = await User.findById(userId).select('email notificationPreferences').lean();
-      if (!user || !user.email) return doc;
-      to = user.email;
-      const prefs = user.notificationPreferences || {};
-      if (!isNotificationEmailAllowedForPreferences(type, prefs)) return doc;
-    } catch (e) {
-      logger.warn(`notify: could not get user email for ${userId}: ${e?.message || e}`);
-      return doc;
-    }
-    try {
-      const { queueEmail } = await import('./email.service.js');
-      queueEmail(
-        to,
-        emailOptions.subject,
-        emailOptions.text || '',
-        emailOptions.html || undefined,
-        `notification_${type}`,
-        { notificationId: doc._id?.toString?.() }
-      );
-    } catch (e) {
-      logger.warn(`notify: queue email failed: ${e?.message || e}`);
+  let doc = null;
+  if (!user || isChannelAllowed(type, 'inApp', user?.notificationPreferences)) {
+    doc = await createNotification(userId, { type, title, message, link });
+  }
+
+  if (emailOptions?.subject && (emailOptions.text || emailOptions.html) && user?.email) {
+    if (isChannelAllowed(type, 'email', user.notificationPreferences)) {
+      try {
+        // eslint-disable-next-line import/no-cycle
+        const { queueEmail } = await import('./email.service.js');
+        queueEmail(
+          user.email,
+          emailOptions.subject,
+          emailOptions.text || '',
+          emailOptions.html || undefined,
+          `notification_${type}`,
+          { notificationId: doc?._id?.toString?.() }
+        );
+      } catch (e) {
+        logger.warn(`notify: queue email failed: ${e?.message || e}`);
+      }
     }
   }
   return doc;

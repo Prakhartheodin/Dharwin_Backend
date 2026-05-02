@@ -755,14 +755,36 @@ const autoEndExpiredMeetings = async () => {
       logger.warn(`[autoEndExpiredMeetings] Failed to end meeting ${m.meetingId}:`, err?.message || err);
     }
   }
+
+  const expiredInternal = await InternalMeeting.find({
+    status: 'scheduled',
+    $expr: {
+      $lte: [
+        { $add: ['$scheduledAt', { $multiply: ['$durationMinutes', 60000] }] },
+        now,
+      ],
+    },
+  }).lean();
+
+  for (const m of expiredInternal) {
+    try {
+      await InternalMeeting.updateOne({ _id: m._id }, { status: 'ended' });
+      await deleteInterviewRoom(m.meetingId).catch((err) =>
+        logger.warn(`[autoEndExpiredMeetings] LiveKit delete failed ${m.meetingId}:`, err?.message || err)
+      );
+      count += 1;
+      logger.info(`[autoEndExpiredMeetings] Auto-ended internal meeting ${m.meetingId} (${m.title})`);
+    } catch (err) {
+      logger.warn(`[autoEndExpiredMeetings] Failed to end internal meeting ${m.meetingId}:`, err?.message || err);
+    }
+  }
+
   return count;
 };
 
-const meetingReminderSentIds = new Set();
-
 /**
  * Send in-app + optional email reminders for meetings starting in ~15 minutes.
- * Called by meeting scheduler. Tracks sent IDs to avoid duplicate reminders.
+ * Called by meeting scheduler. Uses DB-backed reminderSentAt to survive restarts.
  */
 export const sendUpcomingMeetingReminders = async () => {
   const now = new Date();
@@ -771,6 +793,7 @@ export const sendUpcomingMeetingReminders = async () => {
   const meetings = await Meeting.find({
     status: 'scheduled',
     scheduledAt: { $gte: windowStart, $lte: windowEnd },
+    reminderSentAt: null,
   })
     .populate('candidate', 'email')
     .populate('recruiter', 'email')
@@ -780,9 +803,7 @@ export const sendUpcomingMeetingReminders = async () => {
   const { notify } = await import('./notification.service.js');
 
   for (const m of meetings) {
-    const idStr = m._id.toString();
-    if (meetingReminderSentIds.has(idStr)) continue;
-    meetingReminderSentIds.add(idStr);
+    await Meeting.updateOne({ _id: m._id, reminderSentAt: null }, { $set: { reminderSentAt: now } });
     const emails = getInvitationEmails(m);
     const title = m.title || 'Meeting';
     const message = `Your meeting "${title}" starts in 15 minutes.`;
@@ -809,13 +830,6 @@ export const sendUpcomingMeetingReminders = async () => {
       }
     }
   }
-
-  const toDelete = [];
-  for (const idStr of meetingReminderSentIds) {
-    const meeting = await Meeting.findById(idStr).select('scheduledAt').lean();
-    if (!meeting || meeting.scheduledAt < now) toDelete.push(idStr);
-  }
-  toDelete.forEach((id) => meetingReminderSentIds.delete(id));
 };
 
 export {

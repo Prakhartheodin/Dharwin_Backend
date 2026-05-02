@@ -27,6 +27,11 @@ const notificationSchema = mongoose.Schema(
         'sop',
         'support_ticket',
         'general',
+        'chat_message',
+        'joining_reminder',
+        'placement_update',
+        'onboarding_reminder',
+        'system',
       ],
       default: 'general',
       index: true,
@@ -48,6 +53,19 @@ const notificationSchema = mongoose.Schema(
       default: false,
       index: true,
     },
+    triggeredBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    relatedEntity: {
+      type: { type: String, default: null },
+      id: {
+        type: mongoose.Schema.Types.ObjectId,
+        default: null,
+      },
+      _id: false,
+    },
   },
   {
     timestamps: true,
@@ -56,6 +74,7 @@ const notificationSchema = mongoose.Schema(
 
 notificationSchema.index({ user: 1, createdAt: -1 });
 notificationSchema.index({ user: 1, read: 1 });
+notificationSchema.index({ user: 1, type: 1, createdAt: -1 });
 notificationSchema.plugin(paginate);
 
 const Notification = mongoose.model('Notification', notificationSchema);

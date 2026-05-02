@@ -1,4 +1,4 @@
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { NodeHttpHandler } from '@smithy/node-http-handler';
 import config from './config.js';
@@ -77,20 +77,25 @@ const generatePresignedDownloadUrl = async (key, expiresIn = 3600) => {
  */
 const generatePresignedRecordingPlaybackUrl = async (key, expiresIn = 3600) => {
   if (isRecordingStorageLocal() && minioS3Client && config.livekit?.minio?.bucket) {
-    const command = new GetObjectCommand({
-      Bucket: config.livekit.minio.bucket,
-      Key: key,
-    });
+    const bucket = config.livekit.minio.bucket;
+    try {
+      await minioS3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    } catch {
+      throw new Error(`Recording file not found in storage (${key})`);
+    }
+    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
     return getSignedUrl(minioS3Client, command, { expiresIn });
   }
   const bucket = config.livekit?.s3Bucket || config.aws?.bucketName;
   if (!bucket) {
     throw new Error('Recordings bucket not configured (LIVEKIT_S3_BUCKET or AWS_S3_BUCKET_NAME)');
   }
-  const command = new GetObjectCommand({
-    Bucket: bucket,
-    Key: key,
-  });
+  try {
+    await s3Client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+  } catch {
+    throw new Error(`Recording file not found in storage (${key})`);
+  }
+  const command = new GetObjectCommand({ Bucket: bucket, Key: key });
   return getSignedUrl(s3Client, command, { expiresIn });
 };
 

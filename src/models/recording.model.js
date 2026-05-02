@@ -23,10 +23,10 @@ const recordingSchema = mongoose.Schema(
       required: true,
       trim: true,
     },
-    /** recording | completed */
+    /** recording | completed | missing */
     status: {
       type: String,
-      enum: ['recording', 'completed'],
+      enum: ['recording', 'completed', 'missing'],
       default: 'recording',
     },
     startedAt: {

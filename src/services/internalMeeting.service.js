@@ -243,8 +243,6 @@ const autoEndExpiredInternalMeetings = async () => {
   return count;
 };
 
-const internalMeetingReminderSentIds = new Set();
-
 export const sendUpcomingInternalMeetingReminders = async () => {
   const now = new Date();
   const windowStart = new Date(now.getTime() + 10 * 60 * 1000);
@@ -252,15 +250,19 @@ export const sendUpcomingInternalMeetingReminders = async () => {
   const meetings = await InternalMeeting.find({
     status: 'scheduled',
     scheduledAt: { $gte: windowStart, $lte: windowEnd },
+    reminderSentAt: null,
   }).lean();
 
   const User = (await import('../models/user.model.js')).default;
   const { notify } = await import('./notification.service.js');
 
   for (const m of meetings) {
-    const idStr = m._id.toString();
-    if (internalMeetingReminderSentIds.has(idStr)) continue;
-    internalMeetingReminderSentIds.add(idStr);
+    const result = await InternalMeeting.updateOne(
+      { _id: m._id, reminderSentAt: null },
+      { $set: { reminderSentAt: now } }
+    );
+    if (result.modifiedCount === 0) continue;
+
     const emails = getInvitationEmails(m);
     const title = m.title || 'Meeting';
     const message = `Your meeting "${title}" starts in 15 minutes.`;
@@ -289,13 +291,6 @@ export const sendUpcomingInternalMeetingReminders = async () => {
       }
     }
   }
-
-  const toDelete = [];
-  for (const idStr of internalMeetingReminderSentIds) {
-    const meeting = await InternalMeeting.findById(idStr).select('scheduledAt').lean();
-    if (!meeting || meeting.scheduledAt < now) toDelete.push(idStr);
-  }
-  toDelete.forEach((id) => internalMeetingReminderSentIds.delete(id));
 };
 
 export {

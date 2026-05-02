@@ -222,6 +222,8 @@ const employeeSchema = new mongoose.Schema(
       overriddenBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
       overriddenAt: { type: Date },
     },
+    /** Last UTC date the scheduler sent a joining-date reminder — dedup guard (once per day). */
+    joiningReminderSentAt: { type: Date, default: null },
   },
   { timestamps: true }
 );

@@ -105,6 +105,10 @@ const meetingSchema = mongoose.Schema(
       enum: ['scheduled', 'ended', 'cancelled'],
       default: 'scheduled',
     },
+    reminderSentAt: {
+      type: Date,
+      default: null,
+    },
     /** Interview result: pending (not decided), selected, rejected */
     interviewResult: {
       type: String,

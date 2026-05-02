@@ -3,8 +3,12 @@ import jwt from 'jsonwebtoken';
 import config from '../config/config.js';
 import { tokenTypes } from '../config/tokens.js';
 import User from '../models/user.model.js';
+import ChatCall from '../models/chatCall.model.js';
 import * as chatService from './chat.service.js';
 import logger from '../config/logger.js';
+import { notify } from './notification.service.js';
+import * as chatCallService from './chatCall.service.js';
+import { deleteInterviewRoom } from './livekit.service.js';
 
 let io = null;
 
@@ -102,6 +106,119 @@ const initSocket = (httpServer) => {
       }
     });
 
+    socket.on('call:initiate', async (data, cb) => {
+      try {
+        const { conversationId, callType } = data || {};
+        if (!conversationId || !callType) return cb?.({ error: 'conversationId and callType required' });
+        const call = await chatCallService.initiateCall(conversationId, userId, callType);
+        const callId = String(call._id);
+        const participantIds = await chatService.getConversationParticipantIds(conversationId);
+        participantIds.forEach((pid) => {
+          const pidStr = String(pid);
+          if (pidStr !== userId) {
+            io.to(`user:${pidStr}`).emit('call:incoming', {
+              callId,
+              conversationId,
+              callType,
+              caller: { id: userId, name: socket.userName },
+            });
+          }
+        });
+        cb?.({ success: true, callId });
+      } catch (err) {
+        cb?.({ error: err.message || 'Failed to initiate call' });
+      }
+    });
+
+    socket.on('call:accept', async (data, cb) => {
+      try {
+        const { callId } = data || {};
+        if (!callId) return cb?.({ error: 'callId required' });
+        const result = await chatCallService.acceptCall(callId);
+        if (!result) return cb?.({ error: 'Call no longer available' });
+        const { call, tokens } = result;
+        call.participants.forEach((p) => {
+          const pidStr = String(p._id);
+          const token = tokens[pidStr];
+          if (token) {
+            io.to(`user:${pidStr}`).emit('call:start', {
+              callId: String(call._id),
+              conversationId: String(call.conversation),
+              roomName: call.livekitRoom,
+              callType: call.callType,
+              token,
+            });
+          }
+        });
+        cb?.({ success: true });
+      } catch (err) {
+        cb?.({ error: err.message || 'Failed to accept call' });
+      }
+    });
+
+    socket.on('call:decline', async (data) => {
+      const { callId } = data || {};
+      if (!callId) return;
+      try {
+        const call = await chatCallService.declineCall(callId);
+        if (call) {
+          const callerId = String(call.caller);
+          io.to(`user:${callerId}`).emit('call:declined', {
+            callId,
+            conversationId: String(call.conversation),
+            declinedBy: userId,
+          });
+        }
+      } catch (err) {
+        logger.warn(`call:decline failed: ${err.message}`);
+      }
+    });
+
+    socket.on('call:cancel', async (data) => {
+      const { callId } = data || {};
+      if (!callId) return;
+      try {
+        const call = await chatCallService.cancelCall(callId, userId);
+        if (call) {
+          const participantIds = await chatService.getConversationParticipantIds(String(call.conversation));
+          participantIds.forEach((pid) => {
+            io.to(`user:${String(pid)}`).emit('call:cancelled', {
+              callId,
+              conversationId: String(call.conversation),
+              cancelledBy: userId,
+            });
+          });
+        }
+      } catch (err) {
+        logger.warn(`call:cancel failed: ${err.message}`);
+      }
+    });
+
+    socket.on('call:end', async (data) => {
+      const { callId } = data || {};
+      if (!callId) return;
+      try {
+        const call = await chatCallService.endCall(callId);
+        if (call) {
+          if (call.livekitRoom) {
+            await deleteInterviewRoom(call.livekitRoom).catch((err) =>
+              logger.warn(`call:end LiveKit cleanup failed: ${err?.message}`)
+            );
+          }
+          const participantIds = await chatService.getConversationParticipantIds(String(call.conversation));
+          participantIds.forEach((pid) => {
+            io.to(`user:${String(pid)}`).emit('call_ended', {
+              callId,
+              conversationId: String(call.conversation),
+              roomName: call.livekitRoom,
+            });
+          });
+        }
+      } catch (err) {
+        logger.warn(`call:end failed: ${err.message}`);
+      }
+    });
+
     socket.on('get_online_users', (data, cb) => {
       const { userIds } = data || {};
       if (!Array.isArray(userIds)) return cb?.({ error: 'userIds array required' });
@@ -119,6 +236,17 @@ const initSocket = (httpServer) => {
         if (sockets.size === 0) {
           onlineUsers.delete(userId);
           io.emit('user_offline', { userId });
+
+          // End any ongoing calls this user was in — covers browser close / network drop.
+          ChatCall.find({ participants: userId, status: 'ongoing' }).lean().then(async (ongoingCalls) => {
+            for (const call of ongoingCalls) {
+              await chatCallService.endCall(String(call._id)).catch(() => {});
+              if (call.livekitRoom) {
+                await deleteInterviewRoom(call.livekitRoom).catch(() => {});
+                emitCallEnded(String(call.conversation), call.livekitRoom);
+              }
+            }
+          }).catch((err) => logger.warn(`disconnect call cleanup failed: ${err?.message}`));
         }
       }
     });
@@ -151,6 +279,21 @@ const emitNewMessage = async (conversationId, message) => {
         // new_message to non-sender user rooms — fires toast even when recipient not on chat page
         if (uidStr !== senderStr) {
           io.to(`user:${uidStr}`).emit('new_message', payload);
+          // Persist to Notification collection unless recipient is actively viewing this conversation
+          const room = io.sockets.adapter.rooms.get(`conversation:${conversationId}`);
+          const isActive = room && [...room].some(
+            (sid) => io.sockets.sockets.get(sid)?.data?.userId === uidStr
+          );
+          if (!isActive) {
+            notify(uid, {
+              type: 'chat_message',
+              title: payload.sender?.name || 'New message',
+              message: String(payload.content || '').slice(0, 120),
+              link: `/communication/chats/${conversationId}`,
+              triggeredBy: payload.sender?._id || payload.sender?.id,
+              relatedEntity: { type: 'conversation', id: conversationId },
+            }).catch((err) => logger.warn(`chat notify failed: ${err.message}`));
+          }
         }
       });
     }

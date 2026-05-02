@@ -64,23 +64,29 @@ const autoDeactivateResignedCandidates = async () => {
 const sendJoiningDateReminders = async () => {
   try {
     const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    today.setUTCHours(0, 0, 0, 0);
     const inThreeDays = new Date(today);
-    inThreeDays.setDate(inThreeDays.getDate() + 3);
+    inThreeDays.setUTCDate(inThreeDays.getUTCDate() + 3);
     const nextDay = new Date(inThreeDays);
-    nextDay.setDate(nextDay.getDate() + 1);
+    nextDay.setUTCDate(nextDay.getUTCDate() + 1);
 
     const candidates = await Employee.find({
       joiningDate: { $gte: inThreeDays, $lt: nextDay },
       isActive: true,
     })
-      .select('_id fullName email adminId')
+      .select('_id fullName email adminId joiningReminderSentAt')
       .lean();
 
     if (!candidates.length) return;
 
     const { notify, notifyByEmail } = await import('./notification.service.js');
     for (const c of candidates) {
+      if (c.joiningReminderSentAt) {
+        const lastSent = new Date(c.joiningReminderSentAt);
+        lastSent.setUTCHours(0, 0, 0, 0);
+        if (lastSent.getTime() === today.getTime()) continue;
+      }
+
       const name = c.fullName || c.email || 'Candidate';
       const title = 'Joining date reminder';
       const message = `Reminder: ${name}'s joining date is in 3 days.`;
@@ -91,6 +97,7 @@ const sendJoiningDateReminders = async () => {
       if (c.email) {
         notifyByEmail(c.email, { type: 'account', title, message, link }).catch(() => {});
       }
+      await Employee.updateOne({ _id: c._id }, { $set: { joiningReminderSentAt: new Date() } });
     }
   } catch (e) {
     logger.error(`sendJoiningDateReminders failed: ${e.message}`);

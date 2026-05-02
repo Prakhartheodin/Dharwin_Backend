@@ -113,10 +113,12 @@ const generateAccessToken = async ({ roomName, participantName, participantIdent
     throw new ApiError(httpStatus.BAD_REQUEST, 'roomName and participantName are required');
   }
 
-  // Reject token for cancelled meetings
   const meeting = await getMeetingByMeetingId(roomName);
   if (meeting && meeting.status === 'cancelled') {
     throw new ApiError(httpStatus.GONE, 'This meeting has been cancelled');
+  }
+  if (meeting && meeting.status === 'ended') {
+    throw new ApiError(httpStatus.GONE, 'This meeting has ended');
   }
 
   // True host identity is based on meeting host/recruiter/creator email only.
@@ -396,8 +398,8 @@ const startRecording = async (roomName) => {
  * @param {string} egressId - Egress ID to stop
  * @returns {Promise<Object>} Updated egress info
  */
-const stopRecording = async (egressId) => {
-  logger.info('[LiveKit] stopRecording', { egressId });
+const stopRecording = async (egressId, roomName = null) => {
+  logger.info('[LiveKit] stopRecording', { egressId, roomName });
 
   if (!egressClient) {
     throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Recording service not available');
@@ -407,12 +409,20 @@ const stopRecording = async (egressId) => {
     throw new ApiError(httpStatus.BAD_REQUEST, 'egressId is required');
   }
 
+  if (roomName) {
+    const recording = await Recording.findOne({ egressId, meetingId: roomName }).lean();
+    if (!recording) {
+      throw new ApiError(httpStatus.FORBIDDEN, 'Recording does not belong to this room');
+    }
+  }
+
   try {
     const egressInfo = await egressClient.stopEgress(egressId);
     logger.info('[LiveKit] Recording stopped', { egressId, status: egressInfo.status });
+    // Only stamp completedAt here — webhook egress_ended sets authoritative status + filePath.
     await Recording.findOneAndUpdate(
       { egressId },
-      { status: 'completed', completedAt: new Date() },
+      { completedAt: new Date() },
       { new: true }
     );
     return {
@@ -734,9 +744,11 @@ const removeParticipant = async (roomName, participantIdentity) => {
  * @param {string} participantIdentity - Participant identity
  * @returns {boolean} True if participant has been admitted
  */
-const isParticipantAdmitted = (roomName, participantIdentity) => {
+const isParticipantAdmitted = async (roomName, participantIdentity) => {
   const roomAdmitted = admittedParticipants.get(roomName);
-  return roomAdmitted?.has(participantIdentity) || false;
+  if (roomAdmitted?.has(participantIdentity)) return true;
+  const meeting = await getMeetingByMeetingId(String(roomName || '').trim());
+  return Array.isArray(meeting?.admittedIdentities) && meeting.admittedIdentities.includes(participantIdentity);
 };
 
 /**
@@ -787,9 +799,33 @@ const deleteInterviewRoom = async (roomName) => {
     logger.warn('[LiveKit] deleteInterviewRoom skipped', { roomName: rid, hasRoomService: !!roomService });
     return { deleted: false };
   }
+
+  // Stop active egress before deleting room so LiveKit finalizes S3 upload and fires egress_ended webhook.
+  if (egressClient) {
+    try {
+      const activeEgress = await egressClient.listEgress({ roomName: rid });
+      for (const egress of activeEgress) {
+        if (egress.status === EgressStatus.EGRESS_ACTIVE) {
+          await egressClient.stopEgress(egress.egressId).catch((err) =>
+            logger.warn('[LiveKit] stopEgress on room close failed', { egressId: egress.egressId, error: err?.message })
+          );
+          await Recording.findOneAndUpdate(
+            { egressId: egress.egressId },
+            { completedAt: new Date() },
+            { new: true }
+          ).catch(() => {});
+          logger.info('[LiveKit] Stopped active recording on room close', { roomName: rid, egressId: egress.egressId });
+        }
+      }
+    } catch (err) {
+      logger.warn('[LiveKit] Failed to stop egress on room close', { roomName: rid, error: err?.message });
+    }
+  }
+
   await disconnectAllParticipants(rid);
   try {
     await roomService.deleteRoom(rid);
+    admittedParticipants.delete(rid);
     logger.info('[LiveKit] deleteRoom completed', { roomName: rid });
     return { deleted: true };
   } catch (err) {

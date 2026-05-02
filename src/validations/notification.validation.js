@@ -15,4 +15,22 @@ const notificationIdParam = {
   }),
 };
 
-export { getNotifications, notificationIdParam };
+const getAuditLog = {
+  query: Joi.object()
+    .keys({
+      userId: Joi.string().custom(objectId),
+      type: Joi.string().valid(
+        'leave', 'task', 'offer', 'meeting', 'meeting_reminder',
+        'course', 'certificate', 'job_application', 'project',
+        'account', 'recruiter', 'assignment', 'sop', 'support_ticket', 'general'
+      ),
+      from: Joi.date().iso(),
+      to: Joi.date().iso(),
+      read: Joi.boolean(),
+      page: Joi.number().integer().min(1),
+      limit: Joi.number().integer().min(1).max(100),
+    })
+    .or('userId', 'from'),
+};
+
+export { getNotifications, notificationIdParam, getAuditLog };

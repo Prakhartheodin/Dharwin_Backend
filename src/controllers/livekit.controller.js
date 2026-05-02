@@ -2,6 +2,7 @@ import httpStatus from 'http-status';
 import catchAsync from '../utils/catchAsync.js';
 import * as livekitService from '../services/livekit.service.js';
 import * as chatService from '../services/chat.service.js';
+import * as chatCallService from '../services/chatCall.service.js';
 import ApiError from '../utils/ApiError.js';
 
 const parseChatRoomConversationId = (roomName) => {
@@ -27,13 +28,23 @@ const getToken = catchAsync(async (req, res) => {
   const name = participantName || req.user?.name || req.user?.email || 'Anonymous';
   const email = participantEmail || req.user?.email || null;
 
-  // Chat calls: only conversation participants can join (1:1 or group)
+  // Chat calls: P2P — no meeting logic, no waiting room, no host gating
   if (roomName.startsWith('chat-')) {
     const conversationId = parseChatRoomConversationId(roomName);
     if (!conversationId) {
       throw new ApiError(httpStatus.BAD_REQUEST, 'Invalid chat room name');
     }
     await chatService.ensureParticipant(conversationId, participantIdentity);
+    const chatToken = await chatCallService.mintP2PToken(roomName, participantIdentity, name);
+    return res.status(httpStatus.OK).json({
+      token: chatToken,
+      roomName,
+      participantName: name,
+      participantIdentity,
+      isHost: true,    // all peers equal — prevents waiting room UI
+      canPublish: true,
+      meetingEndAt: null,
+    });
   }
 
   const { token, isHost, canPublish, meetingEndAt } = await livekitService.generateAccessToken({
@@ -41,7 +52,7 @@ const getToken = catchAsync(async (req, res) => {
     participantName: name,
     participantIdentity,
     participantEmail: email,
-    forceFullPermissions: forChatCall || roomName.startsWith('chat-'),
+    forceFullPermissions: forChatCall,
   });
 
   res.status(httpStatus.OK).json({
@@ -101,7 +112,7 @@ const stopRecording = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.FORBIDDEN, 'Only the meeting host can stop recording');
   }
 
-  const result = await livekitService.stopRecording(egressId);
+  const result = await livekitService.stopRecording(egressId, roomName);
 
   res.status(httpStatus.OK).json({
     success: true,

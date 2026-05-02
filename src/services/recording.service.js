@@ -78,13 +78,14 @@ const listAll = async (options = {}) => {
   const limit = Math.min(100, Math.max(1, parseInt(options.limit, 10) || 20));
   const skip = (page - 1) * limit;
 
+  const query = { status: { $ne: 'missing' } };
   const [recordings, total] = await Promise.all([
-    Recording.find({})
+    Recording.find(query)
       .sort({ startedAt: -1 })
       .skip(skip)
       .limit(limit)
       .lean(),
-    Recording.countDocuments({}),
+    Recording.countDocuments(query),
   ]);
 
   const meetingIds = [...new Set(recordings.map((r) => r.meetingId))];

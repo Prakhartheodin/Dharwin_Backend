@@ -6,6 +6,7 @@
 import express from 'express';
 import auth from '../../middlewares/auth.js';
 import validate from '../../middlewares/validate.js';
+import requirePermissions from '../../middlewares/requirePermissions.js';
 import * as notificationValidation from '../../validations/notification.validation.js';
 import * as notificationController from '../../controllers/notification.controller.js';
 
@@ -13,6 +14,7 @@ const router = express.Router();
 
 router.use(auth());
 
+router.get('/admin/audit', requirePermissions('candidates.manage'), validate(notificationValidation.getAuditLog), notificationController.getAuditLog);
 router.get('/', validate(notificationValidation.getNotifications), notificationController.list);
 router.get('/unread-count', notificationController.unreadCount);
 router.get('/sse', notificationController.sse);

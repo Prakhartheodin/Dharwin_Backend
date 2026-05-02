@@ -97,15 +97,20 @@ const receiveLiveKitEgressWebhook = catchAsync(async (req, res) => {
       ? new Date(Number(info.endedAt) * 1000)
       : new Date();
 
-    // Optionally get file path from file results (first file output)
-    const fileResults = info.fileResults || info.fileResultsList;
+    // Extract actual uploaded file path — try all known field name variants
+    const fileResults = info.fileResults || info.file_results || info.fileResultsList;
     const filePath =
       fileResults?.[0]?.filename ||
       fileResults?.[0]?.filepath ||
-      fileResults?.[0]?.location;
+      fileResults?.[0]?.location ||
+      info.files?.[0]?.filename ||
+      info.files?.[0]?.location;
+
+    // No filePath = egress failed to produce a file (room ended too fast, upload error, etc.)
+    const status = filePath ? 'completed' : 'missing';
 
     const update = {
-      status: 'completed',
+      status,
       completedAt,
       ...(filePath && { filePath }),
     };
@@ -119,7 +124,8 @@ const receiveLiveKitEgressWebhook = catchAsync(async (req, res) => {
     if (recording) {
       logger.info('[LiveKit Webhook] Recording updated', {
         egressId,
-        status: 'completed',
+        status,
+        filePath: filePath || null,
         completedAt: update.completedAt,
       });
       // If this was a chat call room, link Recording to ChatCall
