@@ -839,11 +839,13 @@ const deleteInterviewRoom = async (roomName) => {
   }
 };
 
-export { 
+export const getEgressClient = () => egressClient;
+
+export {
   generateAccessToken,
   generateSupportCameraToken,
-  startRecording, 
-  stopRecording, 
+  startRecording,
+  stopRecording,
   getRecordingStatus,
   getWaitingParticipants,
   admitParticipant,

@@ -15,6 +15,8 @@ import {
   stopCallRecordSyncScheduler,
 } from './services/callRecordSync.scheduler.js';
 import { startMeetingScheduler, stopMeetingScheduler } from './services/meeting.scheduler.js';
+import { startRecordingScheduler, stopRecordingScheduler } from './services/recording.scheduler.js';
+import { getEgressClient } from './services/livekit.service.js';
 import applicationVerificationCallScheduler from './services/applicationVerificationCall.scheduler.js';
 import { logBolnaAgentConfigHealth } from './utils/bolnaAgentConfig.js';
 import { seedVoiceAgentsFromEnv } from './services/voiceAgent.service.js';
@@ -47,6 +49,7 @@ mongoose
         callRecordSyncSchedulerId = startCallRecordSyncScheduler(1);
         applicationVerificationSchedulerId = applicationVerificationCallScheduler.startApplicationVerificationCallScheduler(2);
         startMeetingScheduler();
+        startRecordingScheduler(getEgressClient());
       }
     });
   })
@@ -65,6 +68,7 @@ const exitHandler = () => {
       stopCallRecordSyncScheduler(callRecordSyncSchedulerId);
       applicationVerificationCallScheduler.stopApplicationVerificationCallScheduler(applicationVerificationSchedulerId);
       stopMeetingScheduler();
+      stopRecordingScheduler();
       process.exit(1);
     });
   } else {
