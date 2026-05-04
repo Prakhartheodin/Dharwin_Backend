@@ -188,6 +188,9 @@ const envVarsSchema = Joi.object()
     REFERRAL_LINK_SECRET: Joi.string().min(16).optional().allow('').description('Referral ref= token signing'),
     /** Canonical org key embedded in referral payload (single-tenant default). */
     REFERRAL_DEFAULT_ORG_ID: Joi.string().trim().optional().default('default'),
+
+    PINECONE_API_KEY: Joi.string().optional().allow('').description('Pinecone API key for vector search'),
+    PINECONE_INDEX: Joi.string().optional().default('dharwin-hr').description('Pinecone index name'),
   })
   .unknown();
 
@@ -430,6 +433,10 @@ const config = {
   },
   candidate: {
     schedulerIntervalMinutes: envVars.CANDIDATE_SCHEDULER_INTERVAL_MINUTES,
+  },
+  pinecone: {
+    apiKey: envVars.PINECONE_API_KEY || '',
+    indexName: envVars.PINECONE_INDEX || 'dharwin-hr',
   },
 };
 

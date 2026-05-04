@@ -20,6 +20,7 @@ import { getEgressClient } from './services/livekit.service.js';
 import applicationVerificationCallScheduler from './services/applicationVerificationCall.scheduler.js';
 import { logBolnaAgentConfigHealth } from './utils/bolnaAgentConfig.js';
 import { seedVoiceAgentsFromEnv } from './services/voiceAgent.service.js';
+import { registerEmbeddingHooks, runEmbeddingBackfill } from './services/embeddingSync.scheduler.js';
 
 let server;
 let candidateSchedulerId;
@@ -50,6 +51,8 @@ mongoose
         applicationVerificationSchedulerId = applicationVerificationCallScheduler.startApplicationVerificationCallScheduler(2);
         startMeetingScheduler();
         startRecordingScheduler(getEgressClient());
+        registerEmbeddingHooks();
+        runEmbeddingBackfill().catch((err) => logger.error(`[EmbeddingSync] backfill failed: ${err?.stack || err?.message || String(err)}`));
       }
     });
   })
