@@ -34,7 +34,7 @@ LIVEKIT_API_SECRET=your_api_secret
 # Recordings: AWS S3 (required for Cloud; Egress uploads here)
 LIVEKIT_S3_BUCKET=recordings
 AWS_ACCESS_KEY_ID=your_aws_key
-AWS_SECRET_ACCESS_KEY=your_aws_secret
+WS_SECRET_ACCESS_KEY=your_aws_secret
 AWS_REGION=us-east-1
 ```
 
