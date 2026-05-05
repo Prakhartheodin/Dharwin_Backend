@@ -3,6 +3,7 @@ import TeamMember from '../models/team.model.js';
 import Employee from '../models/employee.model.js';
 import ApiError from '../utils/ApiError.js';
 import { userIsAdmin } from '../utils/roleHelpers.js';
+import { hasApiPermission } from '../utils/permissionCheck.js';
 import { generatePresignedDownloadUrl } from '../config/s3.js';
 import logger from '../config/logger.js';
 
@@ -67,6 +68,19 @@ const isOwnerOrAdmin = async (user, resource) => {
   return String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id);
 };
 
+/**
+ * Authoritative manage gate: platform super, owner, Administrator, or any active
+ * role granting teams.manage. Honours the route-level permission guard so
+ * non-admin holders of project.teams:create,edit,delete can edit roster rows.
+ */
+const canManageTeam = async (user, resource) => {
+  if (!resource || !user) return false;
+  if (user.platformSuperUser) return true;
+  if (await userIsAdmin(user)) return true;
+  if (String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id)) return true;
+  return hasApiPermission(user, 'teams.manage');
+};
+
 const createTeamMember = async (createdById, payload) => {
   const member = await TeamMember.create({
     createdBy: createdById,
@@ -94,18 +108,22 @@ const queryTeamMembers = async (filter, options) => {
   const userRoleIds = filter.userRoleIds;
   const userEmail = filter.userEmail;
   const canViewCandidateMedia = Boolean(filter.canViewCandidateMedia);
+  const apiPermissions = filter.apiPermissions instanceof Set ? filter.apiPermissions : new Set();
   delete filter.userRoleIds;
   delete filter.userId;
   delete filter.userEmail;
   delete filter.canViewCandidateMedia;
+  delete filter.apiPermissions;
 
   const isAdmin = await userIsAdmin({ roleIds: userRoleIds || [] });
+  /** Org-wide list when admin OR role grants teams.read / teams.manage. */
+  const canSeeAll = isAdmin || apiPermissions.has('teams.read') || apiPermissions.has('teams.manage');
   let finalFilter = { ...filter };
   /**
    * Non-admins must see rosters they did not create: admins add TeamMember rows with createdBy = admin.
    * Show rows the user created, their own roster row (email match), or anyone on a team that lists them.
    */
-  if (!isAdmin && userId) {
+  if (!canSeeAll && userId) {
     const uemail = String(userEmail || '').trim();
     let teamIdsImOn = [];
     if (uemail) {
@@ -166,7 +184,7 @@ const updateTeamMemberById = async (id, updateBody, currentUser) => {
   if (!member) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found');
   }
-  const canUpdate = await isOwnerOrAdmin(currentUser, member);
+  const canUpdate = await canManageTeam(currentUser, member);
   if (!canUpdate) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
@@ -184,7 +202,7 @@ const deleteTeamMemberById = async (id, currentUser) => {
   if (!member) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Team member not found');
   }
-  const canDelete = await isOwnerOrAdmin(currentUser, member);
+  const canDelete = await canManageTeam(currentUser, member);
   if (!canDelete) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }

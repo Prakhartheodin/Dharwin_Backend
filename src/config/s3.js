@@ -107,11 +107,47 @@ const generateFileKey = (originalName, userId, folder = 'documents') => {
   return `${folder}/${userId}/${timestamp}-${randomString}.${extension}`;
 };
 
+/**
+ * HEAD a recording object to verify it actually landed in storage with non-zero
+ * bytes. Used by livekitWebhook.controller after egress_ended — without this,
+ * we trusted Egress's "completed" status blindly and would mark broken/empty
+ * uploads as `completed`.
+ *
+ * Picks the same client as `generatePresignedRecordingPlaybackUrl` (MinIO in
+ * local dev, AWS S3 otherwise).
+ *
+ * @param {string} key
+ * @returns {Promise<{ ok: true, bucket: string, key: string, size: number } | { ok: false, error: string }>}
+ */
+const headRecordingObject = async (key) => {
+  if (!key || typeof key !== 'string') return { ok: false, error: 'invalid key' };
+
+  let client;
+  let bucket;
+  if (isRecordingStorageLocal() && minioS3Client && config.livekit?.minio?.bucket) {
+    client = minioS3Client;
+    bucket = config.livekit.minio.bucket;
+  } else {
+    client = s3Client;
+    bucket = config.livekit?.s3Bucket || config.aws?.bucketName;
+  }
+  if (!bucket) return { ok: false, error: 'recordings bucket not configured' };
+
+  try {
+    const r = await client.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
+    const size = Number(r.ContentLength || 0);
+    return { ok: true, bucket, key, size };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'HEAD failed' };
+  }
+};
+
 export {
   s3Client,
   generatePresignedUploadUrl,
   generatePresignedDownloadUrl,
   generatePresignedRecordingPlaybackUrl,
+  headRecordingObject,
   generateFileKey,
 };
 

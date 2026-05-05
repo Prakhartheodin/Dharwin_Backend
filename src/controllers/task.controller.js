@@ -24,6 +24,7 @@ const list = catchAsync(async (req, res) => {
   const filter = pick(req.query, ['status', 'projectId', 'search', 'assignedToMe']);
   filter.userRoleIds = req.user.roleIds || [];
   filter.userId = req.user.id || req.user._id;
+  filter.apiPermissions = req.authContext?.permissions;
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await queryTasks(filter, options);
   res.send(result);
@@ -34,12 +35,15 @@ const get = catchAsync(async (req, res) => {
   if (!task) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   }
-  const isAdmin = await userIsAdmin(req.user);
+  const isAdmin = req.user.platformSuperUser || await userIsAdmin(req.user);
   const isOwner = String(task.createdBy?._id || task.createdBy) === String(req.user.id || req.user._id);
   const isAssigned = (task.assignedTo || []).some(
     (u) => String(u._id || u) === String(req.user.id || req.user._id)
   );
-  if (!isAdmin && !isOwner && !isAssigned) {
+  /** Anyone with tasks.read / tasks.manage granted via role gets the detail view. */
+  const apiPerms = req.authContext?.permissions;
+  const hasReadPerm = !!apiPerms && (apiPerms.has('tasks.read') || apiPerms.has('tasks.manage'));
+  if (!isAdmin && !isOwner && !isAssigned && !hasReadPerm) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
   res.send(task);

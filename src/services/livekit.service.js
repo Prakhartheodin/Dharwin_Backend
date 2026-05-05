@@ -15,6 +15,7 @@ import { getMeetingByMeetingId } from './meetingLookup.service.js';
 import Recording from '../models/recording.model.js';
 import Meeting from '../models/meeting.model.js';
 import InternalMeeting from '../models/internalMeeting.model.js';
+import recordingSyncService from './recordingSync.service.js';
 
 // Initialize LiveKit clients
 // Convert ws:// to http:// for SDK clients (they use HTTP, not WebSocket)
@@ -343,32 +344,24 @@ const startRecording = async (roomName) => {
     fileType: EncodedFileType.MP4,
   });
 
+  // Phase 1: insert pending row FIRST so DB always knows about every recording
+  // attempt, even if the egress request below fails or the process dies between.
+  const pending = await recordingSyncService.createPending({ meetingId: roomName });
+
+  let egressInfo;
   try {
-    const egressInfo = await egressClient.startRoomCompositeEgress(roomName, fileOutput, {
+    egressInfo = await egressClient.startRoomCompositeEgress(roomName, fileOutput, {
       layout: 'grid',
       audioOnly: false,
       videoOnly: false,
     });
-
-    await Recording.create({
-      meetingId: roomName,
-      egressId: egressInfo.egressId,
-      filePath: filepath,
-      status: 'recording',
-      startedAt: new Date(),
-    });
-
-    logger.info('[LiveKit] Recording started', { roomName, egressId: egressInfo.egressId });
-    return {
-      egressId: egressInfo.egressId,
-      roomName,
-      status: egressInfo.status,
-    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     logger.error('[LiveKit] startRecording failed', { roomName, error: errorMessage });
 
-    // Provide helpful error messages
+    // Mark the pending row failed so cron + future webhooks ignore it.
+    await recordingSyncService.markPendingFailed(pending._id, errorMessage).catch(() => {});
+
     if (errorMessage.includes('no response from servers') || errorMessage.includes('connection refused')) {
       throw new ApiError(
         httpStatus.SERVICE_UNAVAILABLE,
@@ -391,15 +384,41 @@ const startRecording = async (roomName) => {
       `Failed to start recording: ${errorMessage}`
     );
   }
+
+  // Phase 2: attach egressId atomically. If this fails, the egress is orphaned
+  // in LiveKit but webhook will still log + cron will eventually mark missing.
+  try {
+    await recordingSyncService.attachEgressId(pending._id, egressInfo.egressId, filepath);
+  } catch (err) {
+    logger.error('[LiveKit] attachEgressId failed', { roomName, egressId: egressInfo.egressId, error: err?.message });
+    // Don't surface to caller; egress IS running. Webhook will populate row.
+  }
+
+  logger.info('[LiveKit] Recording started', { roomName, egressId: egressInfo.egressId });
+  return {
+    egressId: egressInfo.egressId,
+    roomName,
+    status: egressInfo.status,
+  };
 };
 
 /**
- * Stop recording (egress)
- * @param {string} egressId - Egress ID to stop
- * @returns {Promise<Object>} Updated egress info
+ * Stop recording (egress) with retry + state-machine guard.
+ *
+ * Sequence:
+ *   1. Mark Recording row → `stopping` (monotonic; no-op if already stopping/terminal).
+ *   2. Try `egressClient.stopEgress` up to 3x with backoff.
+ *   3. On "already terminal" responses, treat as success (idempotent for double-stop).
+ *   4. On all-attempts-failed, do NOT regress; cron will catch the row.
+ *
+ * Webhook `egress_ended` is what advances `stopping` → `finalizing` → `completed`.
+ *
+ * @param {string} egressId
+ * @param {string} [roomName]  Optional room scope check.
+ * @param {string} [reason='manual']  Audit string for stopReason.
  */
-const stopRecording = async (egressId, roomName = null) => {
-  logger.info('[LiveKit] stopRecording', { egressId, roomName });
+const stopRecording = async (egressId, roomName = null, reason = 'manual') => {
+  logger.info('[LiveKit] stopRecording', { egressId, roomName, reason });
 
   if (!egressClient) {
     throw new ApiError(httpStatus.SERVICE_UNAVAILABLE, 'Recording service not available');
@@ -416,30 +435,49 @@ const stopRecording = async (egressId, roomName = null) => {
     }
   }
 
-  try {
-    const egressInfo = await egressClient.stopEgress(egressId);
-    logger.info('[LiveKit] Recording stopped', { egressId, status: egressInfo.status });
-    // Only stamp completedAt here — webhook egress_ended sets authoritative status + filePath.
-    await Recording.findOneAndUpdate(
-      { egressId },
-      { completedAt: new Date() },
-      { new: true }
-    );
-    return {
-      egressId,
-      status: egressInfo.status,
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    logger.error('[LiveKit] stopRecording failed', { egressId, error: errorMessage });
-    if (errorMessage.includes('no response from servers') || errorMessage.includes('connection refused')) {
-      throw new ApiError(
-        httpStatus.SERVICE_UNAVAILABLE,
-        'LiveKit Egress service is not running. Please start the Egress service.'
-      );
+  // Mark stopping; subsequent stop calls become idempotent.
+  await recordingSyncService.transitionRecording(
+    egressId,
+    'stopping',
+    { stopRequestedAt: new Date(), stopReason: reason },
+    { inc: { stopAttempts: 1 } }
+  ).catch(() => {});
+
+  const delays = [0, 1000, 3000];
+  let lastErr = null;
+  for (const ms of delays) {
+    if (ms) await new Promise((r) => setTimeout(r, ms));
+    try {
+      const egressInfo = await egressClient.stopEgress(egressId);
+      logger.info('[LiveKit] stopEgress accepted', { egressId, status: egressInfo.status });
+      return { egressId, status: egressInfo.status };
+    } catch (error) {
+      lastErr = error;
+      const m = String(error?.message || '').toLowerCase();
+      // LiveKit responses for an egress that already finished/aborted vary by version.
+      if (m.includes('already') || m.includes('not active') || m.includes('terminated') || m.includes('not found')) {
+        logger.info('[LiveKit] stopEgress: already terminal, treating as success', { egressId });
+        return { egressId, status: 'terminal' };
+      }
+      logger.warn(`[LiveKit] stopEgress attempt failed: ${error.message}`);
     }
-    throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Failed to stop recording: ${errorMessage}`);
   }
+
+  // All attempts failed. Don't regress status; cron will reconcile from LiveKit list.
+  await recordingSyncService.transitionRecording(
+    egressId,
+    'stopping',
+    { lastError: lastErr?.message?.slice(0, 1000) || 'stopEgress retries exhausted' }
+  ).catch(() => {});
+
+  const errorMessage = lastErr instanceof Error ? lastErr.message : 'Unknown error';
+  if (errorMessage.includes('no response from servers') || errorMessage.includes('connection refused')) {
+    throw new ApiError(
+      httpStatus.SERVICE_UNAVAILABLE,
+      'LiveKit Egress service is not running. Please start the Egress service.'
+    );
+  }
+  throw new ApiError(httpStatus.INTERNAL_SERVER_ERROR, `Failed to stop recording: ${errorMessage}`);
 };
 
 /**
@@ -793,6 +831,8 @@ const disconnectAllParticipants = async (roomName) => {
  * Safe to call if the room no longer exists.
  * @param {string} roomName
  */
+const FINALIZE_GRACE_MS = 30 * 1000;
+
 const deleteInterviewRoom = async (roomName) => {
   const rid = String(roomName || '').trim();
   if (!rid || !roomService) {
@@ -800,28 +840,50 @@ const deleteInterviewRoom = async (roomName) => {
     return { deleted: false };
   }
 
-  // Stop active egress before deleting room so LiveKit finalizes S3 upload and fires egress_ended webhook.
+  // Phase 1: stop every active egress for this room (with retry inside stopRecording).
+  const stoppedEgressIds = [];
   if (egressClient) {
     try {
       const activeEgress = await egressClient.listEgress({ roomName: rid });
       for (const egress of activeEgress) {
         if (egress.status === EgressStatus.EGRESS_ACTIVE) {
-          await egressClient.stopEgress(egress.egressId).catch((err) =>
-            logger.warn('[LiveKit] stopEgress on room close failed', { egressId: egress.egressId, error: err?.message })
-          );
-          await Recording.findOneAndUpdate(
-            { egressId: egress.egressId },
-            { completedAt: new Date() },
-            { new: true }
-          ).catch(() => {});
-          logger.info('[LiveKit] Stopped active recording on room close', { roomName: rid, egressId: egress.egressId });
+          try {
+            await stopRecording(egress.egressId, rid, 'room_close');
+            stoppedEgressIds.push(egress.egressId);
+            logger.info('[LiveKit] Stopped active recording on room close', { roomName: rid, egressId: egress.egressId });
+          } catch (err) {
+            logger.warn('[LiveKit] stopRecording during deleteInterviewRoom failed', {
+              egressId: egress.egressId,
+              error: err?.message,
+            });
+          }
         }
       }
     } catch (err) {
-      logger.warn('[LiveKit] Failed to stop egress on room close', { roomName: rid, error: err?.message });
+      logger.warn('[LiveKit] Failed to list egress on room close', { roomName: rid, error: err?.message });
     }
   }
 
+  // Phase 2: WAIT for each stopped egress to reach terminal/finalizing state.
+  // Without this, deleteRoom evicts the EG_* recorder participant mid-encode →
+  // truncated MP4 and incomplete S3 upload.
+  if (stoppedEgressIds.length) {
+    await Promise.all(
+      stoppedEgressIds.map(async (egressId) => {
+        const finalState = await recordingSyncService.awaitRecordingTerminal(egressId, FINALIZE_GRACE_MS);
+        if (!finalState) {
+          logger.warn('[LiveKit] Egress did not finalize within grace window; proceeding with deleteRoom', {
+            egressId,
+            graceMs: FINALIZE_GRACE_MS,
+          });
+        } else {
+          logger.info('[LiveKit] Egress finalized before deleteRoom', { egressId, status: finalState.status });
+        }
+      })
+    );
+  }
+
+  // Phase 3: now safe to evict humans + destroy room.
   await disconnectAllParticipants(rid);
   try {
     await roomService.deleteRoom(rid);

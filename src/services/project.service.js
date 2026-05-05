@@ -8,6 +8,7 @@ import TeamGroup from '../models/teamGroup.model.js';
 import ApiError from '../utils/ApiError.js';
 import { buildSpecialistTaskSlugOrConditions } from '../constants/candidateProjectTaskTypes.js';
 import { userIsAdmin, userHasCandidateRole } from '../utils/roleHelpers.js';
+import { hasApiPermission } from '../utils/permissionCheck.js';
 
 /** Safe substring search — user input is literal, not a RegExp pattern. */
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -17,6 +18,20 @@ const isOwnerOrAdmin = async (user, resource) => {
   const admin = await userIsAdmin(user);
   if (admin) return true;
   return String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id);
+};
+
+/**
+ * Authoritative manage gate: platform super, owner, Administrator, or any active
+ * role granting projects.manage. The route layer already enforces projects.manage
+ * for write paths; this mirrors it so non-admin role holders can complete the
+ * write (e.g. assignedTo / assignedTeams updates).
+ */
+const canManageProject = async (user, resource) => {
+  if (!resource || !user) return false;
+  if (user.platformSuperUser) return true;
+  if (await userIsAdmin(user)) return true;
+  if (String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id)) return true;
+  return hasApiPermission(user, 'projects.manage');
 };
 
 const PROJECT_LIST_LIMIT_MAX = 200;
@@ -75,9 +90,18 @@ const queryProjects = async (filter, options) => {
   const isAdmin = await userIsAdmin({ roleIds: filter.userRoleIds || [] });
   const userId = filter.userId;
   const userRoleIds = filter.userRoleIds || [];
+  const apiPermissions = filter.apiPermissions instanceof Set ? filter.apiPermissions : new Set();
+  delete filter.apiPermissions;
   const mineOnly =
     filter.mine === true || filter.mine === 'true' || filter.mine === '1' || filter.mine === 1;
   delete filter.mine;
+  /**
+   * canSeeAll: any role granting projects.read / projects.manage gives the
+   * org-wide list. This honours the RBAC matrix so Manager/Employee with the
+   * Projects box ticked actually see every project (not just their own).
+   */
+  const canSeeAll =
+    isAdmin || apiPermissions.has('projects.read') || apiPermissions.has('projects.manage');
 
   const searchDisjunction = filter.$or;
   const hasSearchDisjunction = Array.isArray(searchDisjunction) && searchDisjunction.length > 0;
@@ -85,7 +109,7 @@ const queryProjects = async (filter, options) => {
     delete filter.$or;
   }
 
-  if (!isAdmin && userId) {
+  if (!canSeeAll && userId) {
     const isCandidate = await userHasCandidateRole({ roleIds: userRoleIds });
     if (isCandidate && mongoose.Types.ObjectId.isValid(String(userId))) {
       const userOid = new mongoose.Types.ObjectId(String(userId));
@@ -110,7 +134,7 @@ const queryProjects = async (filter, options) => {
     } else {
       filter.createdBy = userId;
     }
-  } else if (isAdmin && mineOnly && userId) {
+  } else if (canSeeAll && mineOnly && userId) {
     if (hasSearchDisjunction) {
       filter.$and = [{ $or: searchDisjunction }, { createdBy: userId }];
     } else {
@@ -173,7 +197,7 @@ const updateProjectById = async (id, updateBody, currentUser) => {
   if (!project) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Project not found');
   }
-  const canUpdate = await isOwnerOrAdmin(currentUser, project);
+  const canUpdate = await canManageProject(currentUser, project);
   if (!canUpdate) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
@@ -208,7 +232,7 @@ const deleteProjectById = async (id, currentUser) => {
   if (!project) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Project not found');
   }
-  const canDelete = await isOwnerOrAdmin(currentUser, project);
+  const canDelete = await canManageProject(currentUser, project);
   if (!canDelete) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }

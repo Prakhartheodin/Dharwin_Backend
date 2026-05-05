@@ -8,6 +8,7 @@ import ChatCall from '../models/chatCall.model.js';
 import * as livekitService from './livekit.service.js';
 import Recording from '../models/recording.model.js';
 import { generatePresignedDownloadUrl, generatePresignedRecordingPlaybackUrl } from '../config/s3.js';
+import logger from '../config/logger.js';
 
 /** Same presigned TTL as user profilePicture (auth.controller, employee.service). */
 const PROFILE_PICTURE_PRESIGN_TTL_SEC = 7 * 24 * 3600;
@@ -479,6 +480,16 @@ const listCallsForConversation = async (conversationId, userId, { limit = 50 } =
 };
 
 const listCalls = async (userId, { page = 1, limit = 20, isAdmin = false }) => {
+  // Reconcile stuck rings/ongoing before reading so the UI never shows a call
+  // that's been "ringing" for an hour. Cheap bulk update; no-op when clean.
+  // Lazy require to avoid the static cycle chat.service → chatCall.service → chat.service.
+  try {
+    // eslint-disable-next-line import/no-cycle
+    const chatCallMod = await import('./chatCall.service.js');
+    await chatCallMod.expireStaleCalls();
+  } catch (err) {
+    logger.warn(`[listCalls] expireStaleCalls failed: ${err?.message}`);
+  }
   const skip = (page - 1) * limit;
   const filter = isAdmin ? {} : { $or: [{ caller: userId }, { participants: userId }] };
   const calls = await ChatCall.find(filter)

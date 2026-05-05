@@ -6,6 +6,7 @@ import bolnaService from '../services/bolna.service.js';
 import { initiateCandidateVerificationCall } from '../services/bolnaCandidateVerification.service.js';
 import { initiateJobPostingVerificationCall } from '../services/bolnaJobPostingVerification.service.js';
 import callRecordService from '../services/callRecord.service.js';
+import callSyncService from '../services/callSync.service.js';
 import { getJobById } from '../services/job.service.js';
 import Job from '../models/job.model.js';
 import config from '../config/config.js';
@@ -60,16 +61,15 @@ const initiateCall = catchAsync(async (req, res) => {
         },
       }
     );
-    // Seed a minimal record immediately so recruiter/job calls never remain uncategorized.
-    await callRecordService.updateCallRecordByExecutionId(
-      result.executionId,
-      {
-        purpose: 'job_posting_verification',
-        job: job._id,
-        status: 'initiated',
-      },
-      { upsert: true }
-    );
+    // Seed via the single chokepoint — idempotent, emits socket, sets statusRank.
+    await callSyncService.seedRecord({
+      executionId: result.executionId,
+      job: job._id,
+      purpose: 'job_posting_verification',
+      agentId: config.bolna.agentId,
+      recipientPhone: job.organisation?.phone || body.phone || null,
+      businessName: job.organisation?.name || null,
+    });
   }
   res.status(httpStatus.OK).send({
     success: true,
@@ -150,15 +150,15 @@ const initiateCandidateCall = catchAsync(async (req, res) => {
     throw new ApiError(isClientPhone ? httpStatus.BAD_REQUEST : httpStatus.BAD_GATEWAY, msg);
   }
 
-  // Create call record via webhook-style payload
-  const CallRecord = (await import('../models/callRecord.model.js')).default;
-  await CallRecord.create({
+  // Seed CallRecord via the single chokepoint — race-safe vs webhook arriving first.
+  await callSyncService.seedRecord({
     executionId: result.executionId,
-    recipientPhoneNumber: formattedPhone,
-    purpose: 'job_application_verification',
     candidate: candidateId,
     job: jobId,
-    status: 'initiated',
+    purpose: 'job_application_verification',
+    agentId: candidateAgentId,
+    recipientPhone: formattedPhone,
+    businessName: candidate.fullName,
   });
 
   // Update JobApplication with call details
@@ -320,6 +320,12 @@ async function sendPostCallEmailAndNotification(record, application) {
   }
 }
 
+/**
+ * Webhook handler — recruiter/job posting verification calls.
+ * All state mutations route through callSyncService.applyEvent (idempotent,
+ * monotonic, socket-emitting). Post-call email side-effect runs only on
+ * terminal status, claimed via postCallFollowUpSent flag in CallRecord.
+ */
 const receiveWebhook = catchAsync(async (req, res) => {
   const payload = req.body || {};
   if (typeof payload !== 'object' || Array.isArray(payload)) {
@@ -328,10 +334,11 @@ const receiveWebhook = catchAsync(async (req, res) => {
       error: 'Body must be a JSON object',
     });
   }
-  const record = await callRecordService.createFromWebhook(payload);
 
-  // Fallback: if this webhook is for a candidate call (executionId matches JobApplication), send email
-  if (record.executionId) {
+  const result = await callSyncService.applyEvent(payload, 'webhook');
+  const record = result.record;
+
+  if (record?.executionId) {
     const JobApplication = (await import('../models/jobApplication.model.js')).default;
     const application = await JobApplication.findOne({ verificationCallExecutionId: record.executionId })
       .select('candidate job')
@@ -345,9 +352,11 @@ const receiveWebhook = catchAsync(async (req, res) => {
 
   res.status(httpStatus.OK).send({
     success: true,
-    id: record._id?.toString(),
-    executionId: record.executionId,
-    message: 'Webhook received and stored',
+    applied: result.applied,
+    reason: result.reason,
+    id: record?._id?.toString?.() || record?.id || null,
+    executionId: record?.executionId || null,
+    message: 'Webhook accepted',
   });
 });
 
@@ -360,10 +369,13 @@ const receiveCandidateWebhook = catchAsync(async (req, res) => {
     });
   }
 
-  const enrichedPayload = { ...payload, purpose: 'job_application_verification' };
-  const record = await callRecordService.createFromWebhook(enrichedPayload);
+  // Tag purpose so applyEvent's stub-create path categorizes correctly when
+  // the webhook beats the seed.
+  const enriched = { ...payload, purpose: payload.purpose || 'job_application_verification' };
+  const result = await callSyncService.applyEvent(enriched, 'webhook_candidate');
+  const record = result.record;
 
-  if (record.executionId) {
+  if (record?.executionId) {
     const JobApplication = (await import('../models/jobApplication.model.js')).default;
     const application = await JobApplication.findOne({ verificationCallExecutionId: record.executionId })
       .select('candidate job')
@@ -379,9 +391,11 @@ const receiveCandidateWebhook = catchAsync(async (req, res) => {
 
   res.status(httpStatus.OK).send({
     success: true,
-    id: record._id?.toString(),
-    executionId: record.executionId,
-    message: 'Candidate verification webhook received and stored',
+    applied: result.applied,
+    reason: result.reason,
+    id: record?._id?.toString?.() || record?.id || null,
+    executionId: record?.executionId || null,
+    message: 'Candidate verification webhook accepted',
   });
 });
 

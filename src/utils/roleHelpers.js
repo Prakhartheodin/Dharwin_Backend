@@ -1,4 +1,5 @@
 import Role from '../models/role.model.js';
+import { getUserPermissionContext } from '../services/permission.service.js';
 
 /**
  * Staff / internal roles: if the user has any of these (active), skip public-candidate auto-activate on email verify.
@@ -133,14 +134,25 @@ export const userHasRecruiterRole = async (user) => {
 const ATS_JOB_FULL_LISTING_ROLE_NAMES = ['Administrator', 'Agent', 'agent', 'Recruiter'];
 
 /**
- * True for Administrator, Agent, or Recruiter (routes still require jobs.read / jobs.manage as appropriate).
- * Used so non-poster staff are not limited to createdBy-only job lists.
+ * True if user may view the org-wide job list. Resolves in two stages:
+ *  1) Permission-driven: any role granting `ats.jobs:view` (→ jobs.read) or
+ *     `ats.jobs:create,edit,delete` (→ jobs.manage). This is the new RBAC contract,
+ *     so any role with the Jobs matrix box ticked sees the full tenant list.
+ *  2) Legacy named-role fallback (Administrator / Agent / Recruiter), kept so
+ *     pre-RBAC seeded roles still work until the matrix is fully populated.
+ *
  * @param {Object|null|undefined} user
  * @returns {Promise<boolean>}
  */
 export const userCanViewAllJobsForListing = async (user) => {
   if (!user) return false;
   if (user.platformSuperUser) return true;
+
+  // (1) Permission-driven: jobs.read / jobs.manage from any active role
+  const { permissions } = await getUserPermissionContext(user);
+  if (permissions.has('jobs.read') || permissions.has('jobs.manage')) return true;
+
+  // (2) Legacy named-role fallback
   const roleIds = user?.roleIds || [];
   if (!roleIds.length) return false;
   const hasRole = await Role.exists({

@@ -244,7 +244,7 @@ const ROUTING_TOOLS = [
     type: 'function',
     function: {
       name: 'fetch_jobs',
-      description: 'Retrieve company job postings from the Job collection. Both internal openings and mirrored external listings live here, distinguished by jobOrigin: "internal" (created in-app) or "external" (mirrored from a job board). Use jobOrigin filter when the user asks specifically for one. For raw saved board listings (not mirrored), use fetch_external_jobs.',
+      description: 'Retrieve job postings from the ATS Jobs page (Job collection). Includes internal openings and external listings that have been mirrored into the ATS, distinguished by jobOrigin: "internal" (created in-app) or "external" (mirrored). Use jobOrigin filter when the user asks specifically for one. The raw ExternalJob collection (ATS External Jobs page) is intentionally NOT exposed.',
       parameters: {
         type: 'object',
         properties: {
@@ -266,7 +266,7 @@ const ROUTING_TOOLS = [
     type: 'function',
     function: {
       name: 'fetch_external_jobs',
-      description: 'Retrieve external/aggregated job listings saved from job boards (LinkedIn, active-jobs-db). Use for: "external jobs", "saved jobs", "LinkedIn jobs", "scraped jobs".',
+      description: 'Retrieve external job listings that have been mirrored into the ATS Jobs page (Job collection with jobOrigin="external"). Does NOT touch the raw ExternalJob (External Jobs ATS page) collection. Use for: "external jobs", "mirrored jobs", "external listings".',
       parameters: {
         type: 'object',
         properties: {
@@ -916,10 +916,11 @@ async function fetchModule(name, args, user) {
       if (args.company)  queryParts.push(args.company);
       if (args.jobOrigin) queryParts.push(args.jobOrigin === 'external' ? 'external listing job board' : 'internal opening');
 
-      // When origin not specified, query BOTH indexes (jobs + external_jobs) so the LLM
-      // can present every result with its real origin. Mirroring through the `Job` model
-      // alone made every result look "internal" because external listings live in
-      // ExternalJob, not Job.
+      // Source of truth = Job collection only (the ATS Jobs page). External job-board
+      // entries from the separate ExternalJob collection (ATS External Jobs page) are
+      // intentionally excluded — only those that have been mirrored into Job
+      // (jobOrigin: 'external') are visible to the chatbot. This matches what the user
+      // sees on the Jobs page in the ATS.
       const wantInternal = !args.jobOrigin || args.jobOrigin === 'internal';
       const wantExternal = !args.jobOrigin || args.jobOrigin === 'external';
       let qEmb;
@@ -930,128 +931,62 @@ async function fetchModule(name, args, user) {
         return [];
       }
 
-      const halfLimit = Math.max(20, Math.ceil(limit / 2));
-      const tasks = [];
-
-      // ─── Internal Job index ──────────────────────────────────────────────────
-      if (wantInternal) {
-        tasks.push((async () => {
-          try {
-            const f = {};
-            if (args.status)          f.isActive = { $eq: args.status === 'Active' };
-            if (args.jobOrigin)       f.jobOrigin = { $eq: args.jobOrigin };
-            if (args.jobType)         f.jobType = { $eq: args.jobType };
-            if (args.location)        f.location = { $eq: args.location };
-            if (args.experienceLevel) f.experienceLevel = { $eq: args.experienceLevel };
-            const matches = await pineconeQuery('jobs', qEmb, halfLimit, f);
-            const ids = matches.map((m) => m.metadata?.mongoId).filter(Boolean);
-            if (!ids.length) return [];
-            const hQ = { _id: { $in: ids } };
-            if (args.jobType)         hQ.jobType = args.jobType;
-            if (args.experienceLevel) hQ.experienceLevel = args.experienceLevel;
-            if (args.status)          hQ.status = args.status;
-            if (args.jobOrigin)       hQ.jobOrigin = args.jobOrigin;
-            if (args.company)         hQ['organisation.name'] = { $regex: escapeRegex(args.company), $options: 'i' };
-            if (args.location)        hQ.location = { $regex: escapeRegex(args.location), $options: 'i' };
-            const docs = await Job.find(hQ)
-              .select('title jobType location status salaryRange experienceLevel skillTags skillRequirements organisation jobOrigin externalRef externalPlatformUrl jobDescription createdAt')
-              .sort({ createdAt: -1 })
-              .lean();
-            return docs.map((d) => ({ ...d, _origin: d.jobOrigin === 'external' ? 'External (mirrored)' : 'Internal' }));
-          } catch (err) {
-            logger.warn(`[ChatAssistant][fetch_jobs:internal] Pinecone error: ${err.message}`);
-            return [];
-          }
-        })());
+      let merged = [];
+      try {
+        const f = {};
+        if (args.status)          f.isActive = { $eq: args.status === 'Active' };
+        if (args.jobOrigin)       f.jobOrigin = { $eq: args.jobOrigin };
+        if (args.jobType)         f.jobType = { $eq: args.jobType };
+        if (args.location)        f.location = { $eq: args.location };
+        if (args.experienceLevel) f.experienceLevel = { $eq: args.experienceLevel };
+        const matches = await pineconeQuery('jobs', qEmb, limit, f);
+        const ids = matches.map((m) => m.metadata?.mongoId).filter(Boolean);
+        if (ids.length) {
+          const hQ = { _id: { $in: ids } };
+          if (args.jobType)         hQ.jobType = args.jobType;
+          if (args.experienceLevel) hQ.experienceLevel = args.experienceLevel;
+          if (args.status)          hQ.status = args.status;
+          if (args.jobOrigin)       hQ.jobOrigin = args.jobOrigin;
+          if (args.company)         hQ['organisation.name'] = { $regex: escapeRegex(args.company), $options: 'i' };
+          if (args.location)        hQ.location = { $regex: escapeRegex(args.location), $options: 'i' };
+          const docs = await Job.find(hQ)
+            .select('title jobType location status salaryRange experienceLevel skillTags skillRequirements organisation jobOrigin externalRef externalPlatformUrl jobDescription createdAt')
+            .sort({ createdAt: -1 })
+            .lean();
+          merged = docs.map((d) => ({ ...d, _origin: d.jobOrigin === 'external' ? 'External (mirrored)' : 'Internal' }));
+        }
+      } catch (err) {
+        logger.warn(`[ChatAssistant][fetch_jobs] Pinecone error: ${err.message}`);
       }
 
-      // ─── External Job index (job-board listings) ─────────────────────────────
-      if (wantExternal) {
-        tasks.push((async () => {
-          try {
-            const f = {};
-            if (args.location) f.location = { $eq: args.location };
-            if (args.jobType)  f.jobType  = { $eq: args.jobType };
-            const matches = await pineconeQuery('external_jobs', qEmb, halfLimit, f);
-            const ids = matches.map((m) => m.metadata?.mongoId).filter(Boolean);
-            if (!ids.length) return [];
-            const hQ = { _id: { $in: ids } };
-            if (args.company)  hQ.company  = { $regex: escapeRegex(args.company),  $options: 'i' };
-            if (args.location) hQ.location = { $regex: escapeRegex(args.location), $options: 'i' };
-            if (args.jobType)  hQ.jobType  = args.jobType;
-            const docs = await ExternalJob.find(hQ)
-              .select('title company location jobType experienceLevel source platformUrl postedAt isRemote salaryMin salaryMax savedAt skills')
-              .sort({ savedAt: -1 })
-              .lean();
-            // Project ExternalJob shape onto a Job-like row with explicit external origin.
-            return docs.map((d) => ({
-              _id: d._id,
-              title: d.title,
-              jobType: d.jobType,
-              location: d.location,
-              status: 'External',
-              experienceLevel: d.experienceLevel,
-              skillTags: Array.isArray(d.skills) ? d.skills : [],
-              organisation: { name: d.company },
-              jobOrigin: 'external',
-              externalRef: { source: d.source },
-              externalPlatformUrl: d.platformUrl,
-              isRemote: d.isRemote,
-              salaryRange: (d.salaryMin || d.salaryMax) ? { min: d.salaryMin, max: d.salaryMax } : undefined,
-              _origin: `External (${d.source || 'job board'})`,
-            }));
-          } catch (err) {
-            logger.warn(`[ChatAssistant][fetch_jobs:external] Pinecone error: ${err.message}`);
-            return [];
-          }
-        })());
-      }
-
-      const settled = await Promise.all(tasks);
-      let merged = settled.flat();
-
-      // De-duplicate by _id — a single listing may surface in both indexes if a Job
-      // mirror and the original ExternalJob record co-exist.
-      const seen = new Set();
-      merged = merged.filter((r) => {
-        const k = String(r._id);
-        if (seen.has(k)) return false;
-        seen.add(k);
-        return true;
-      });
-      merged = merged.slice(0, limit);
-
-      // Authoritative counts come from the Mongo collections (countDocuments) — Pinecone
-      // returns top-K only and is unsuitable for "how many" answers.
-      const [internalTotal, externalJobOriginInternal, externalTotal] = await Promise.all([
+      // Authoritative counts from Mongo. Both internal and external counts come from the
+      // Job collection (mirrored external = Job rows with jobOrigin='external', shown on
+      // the Jobs page). Raw ExternalJob (External Jobs ATS page) is NOT counted here.
+      // Hard delete is standardized — no soft-deleted ghosts.
+      const [internalTotal, externalMirroredTotal] = await Promise.all([
         wantInternal ? Job.countDocuments({ jobOrigin: { $ne: 'external' } }) : 0,
-        wantInternal ? Job.countDocuments({ jobOrigin: 'external' })          : 0,
-        wantExternal ? ExternalJob.countDocuments({})                         : 0,
+        wantExternal ? Job.countDocuments({ jobOrigin: 'external' })          : 0,
       ]);
 
-      // Total = internal company postings + external job-board listings.
-      // mirroredExternal (Job docs flagged external) is reported separately for transparency
-      // but excluded from total to avoid double-counting when the same listing exists in both
-      // collections.
       const counts = {
         internal: internalTotal,
-        externalMirrored: externalJobOriginInternal,
-        externalListings: externalTotal,
-        total:
-          (wantInternal ? internalTotal : 0) +
-          (wantExternal ? externalTotal : 0),
+        external: externalMirroredTotal,
+        total: internalTotal + externalMirroredTotal,
       };
 
       logger.info(
         `[ChatAssistant][fetch_jobs] origin=${args.jobOrigin || 'any'} returned=${merged.length} ` +
-        `counts=int:${counts.internal}+mirror:${counts.externalMirrored}+ext:${counts.externalListings}=${counts.total}`
+        `counts=int:${counts.internal}+ext:${counts.external}=${counts.total}`
       );
       return { records: merged, counts, label: 'job' };
     }
 
     case 'fetch_external_jobs': {
+      // Redirected to mirrored Job rows (jobOrigin='external'). Raw ExternalJob collection
+      // (the ATS External Jobs page) is intentionally not exposed to the chatbot — only
+      // listings that have been mirrored into the ATS Jobs page are visible here.
       const limit = Math.min(args.limit || 100, 200);
-      const queryParts = ['external job listing'];
+      const queryParts = ['external mirrored job listing'];
       if (args.search)   queryParts.push(args.search);
       if (args.company)  queryParts.push(args.company);
       if (args.location) queryParts.push(args.location);
@@ -1059,10 +994,9 @@ async function fetchModule(name, args, user) {
       let matches = [];
       try {
         const qEmb = await embedQuery(queryParts.join(' '));
-        const pineconeFilter = {};
-        if (args.source) pineconeFilter.source = { $eq: args.source };
-        matches = await pineconeQuery('external_jobs', qEmb, limit, pineconeFilter);
-        logger.info(`[ChatAssistant][fetch_external_jobs] pinecone matches=${matches.length}`);
+        const pineconeFilter = { jobOrigin: { $eq: 'external' } };
+        matches = await pineconeQuery('jobs', qEmb, limit, pineconeFilter);
+        logger.info(`[ChatAssistant][fetch_external_jobs] pinecone(jobs/external) matches=${matches.length}`);
       } catch (err) {
         logger.warn(`[ChatAssistant][fetch_external_jobs] Pinecone error: ${err.message}`);
         return [];
@@ -1071,14 +1005,14 @@ async function fetchModule(name, args, user) {
       const mongoIds = matches.map((m) => m.metadata?.mongoId).filter(Boolean);
       if (!mongoIds.length) return [];
 
-      const hydrateQ = { _id: { $in: mongoIds } };
-      if (args.company)  hydrateQ.company = { $regex: escapeRegex(args.company), $options: 'i' };
+      const hydrateQ = { _id: { $in: mongoIds }, jobOrigin: 'external' };
+      if (args.company)  hydrateQ['organisation.name'] = { $regex: escapeRegex(args.company), $options: 'i' };
       if (args.location) hydrateQ.location = { $regex: escapeRegex(args.location), $options: 'i' };
-      if (args.source)   hydrateQ.source = args.source;
+      if (args.source)   hydrateQ['externalRef.source'] = args.source;
 
-      return ExternalJob.find(hydrateQ)
-        .select('title company location jobType experienceLevel source platformUrl postedAt isRemote salaryMin salaryMax savedAt')
-        .sort({ savedAt: -1 })
+      return Job.find(hydrateQ)
+        .select('title organisation location jobType experienceLevel status salaryRange skillTags externalRef externalPlatformUrl jobDescription createdAt')
+        .sort({ createdAt: -1 })
         .lean();
     }
 
@@ -1228,14 +1162,24 @@ async function fetchModule(name, args, user) {
     case 'fetch_tasks': {
       const limit = Math.min(args.limit || 50, 200);
       const isAdmin = await userIsAdmin({ roleIds: user?.roleIds || [] });
-      let q;
+
+      let scopeClause;
       if (isAdmin) {
-        // Admin → every task in DB (matches site behavior: no per-user filter).
-        q = {};
+        // Admin → every task in DB (matches site queryTasks: no per-user filter).
+        scopeClause = {};
       } else {
-        q = { $or: [{ assignedTo: userId }, { createdBy: userId }] };
+        scopeClause = { $or: [{ assignedTo: userId }, { createdBy: userId }] };
       }
-      if (args.status) q.status = args.status;
+
+      // Orphan guard: only count tasks that belong to a live project. Excludes both
+      // (a) projectId pointing at a deleted Project (cascade gap / bulk import) and
+      // (b) projectId === null (unassigned task — invisible to project tiles, would
+      // make chatbot total disagree with the sum of per-project totals).
+      const liveProjectIds = await Project.distinct('_id', {});
+      const orphanGuard = { projectId: { $in: liveProjectIds } };
+
+      const q = { $and: [scopeClause, orphanGuard, ...(args.status ? [{ status: args.status }] : [])] };
+
       const totalAll = await Task.countDocuments(q);
       const records = await Task.find(q)
         .select('title description status dueDate tags taskCode projectId assignedTo createdBy')
@@ -1244,7 +1188,7 @@ async function fetchModule(name, args, user) {
         .sort({ createdAt: -1 })
         .limit(limit)
         .lean();
-      logger.info(`[ChatAssistant][fetch_tasks] isAdmin=${isAdmin} totalDB=${totalAll} returned=${records.length}`);
+      logger.info(`[ChatAssistant][fetch_tasks] isAdmin=${isAdmin} liveProjects=${liveProjectIds.length} total=${totalAll} returned=${records.length}`);
       return { records, total: totalAll, scope: isAdmin ? 'all' : 'mine', label: 'task' };
     }
 
@@ -2718,12 +2662,18 @@ function summarizeData(fetchedData) {
     }
 
     if (key === 'fetch_external_jobs') {
+      // Now sourced from Job collection (jobOrigin='external'), not raw ExternalJob.
+      // Fields shifted: company → organisation.name, source → externalRef.source,
+      // salaryMin/Max → salaryRange.{min,max}, isRemote not on Job.
       const jobs = Array.isArray(data) ? data : [];
-      const lines = [`--- external job listings (${jobs.length} total, ORIGIN: External/Job Board) ---`];
+      const lines = [`--- external job listings mirrored into ATS (${jobs.length} total) ---`];
       for (const j of jobs) {
-        let line = `TITLE: ${j.title || 'N/A'} | ORIGIN: External (${j.source || 'Unknown'}) | COMPANY: ${j.company || 'N/A'} | TYPE: ${j.jobType || 'N/A'} | LOCATION: ${j.location || 'N/A'}`;
-        if (j.isRemote)                    line += ` | REMOTE: Yes`;
-        if (j.salaryMin || j.salaryMax)    line += ` | SALARY: ${j.salaryMin || '?'}-${j.salaryMax || '?'}`;
+        const company = j.organisation?.name || j.company || 'N/A';
+        const source = j.externalRef?.source || j.source || 'Unknown';
+        const sMin = j.salaryRange?.min ?? j.salaryMin;
+        const sMax = j.salaryRange?.max ?? j.salaryMax;
+        let line = `TITLE: ${j.title || 'N/A'} | ORIGIN: External (${source}) | COMPANY: ${company} | TYPE: ${j.jobType || 'N/A'} | LOCATION: ${j.location || 'N/A'} | STATUS: ${j.status || 'N/A'}`;
+        if (sMin || sMax) line += ` | SALARY: ${sMin || '?'}-${sMax || '?'}`;
         lines.push(line);
       }
       parts.push(lines.join('\n'));

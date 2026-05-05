@@ -43,6 +43,18 @@ const listByMeetingId = async (meetingIdOrMongoId) => {
 
   const result = [];
   for (const rec of recordings) {
+    // Sanity-cap durationMs. Old webhook bug stored completedAt as ns*1000
+    // (year 58000+), making completedAt - startedAt overflow into hundreds of
+    // hours. Anything > MAX_REASONABLE is bogus → null.
+    const MAX_REASONABLE_MS = 24 * 60 * 60 * 1000; // 24 hours
+    let durationMs = rec.durationMs ?? null;
+    if (durationMs == null && rec.startedAt && rec.completedAt) {
+      const ms = new Date(rec.completedAt).getTime() - new Date(rec.startedAt).getTime();
+      if (Number.isFinite(ms) && ms >= 0) durationMs = ms;
+    }
+    if (durationMs != null && (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > MAX_REASONABLE_MS)) {
+      durationMs = null;
+    }
     const item = {
       id: rec._id?.toString(),
       meetingId: rec.meetingId,
@@ -51,6 +63,8 @@ const listByMeetingId = async (meetingIdOrMongoId) => {
       status: rec.status,
       startedAt: rec.startedAt,
       completedAt: rec.completedAt,
+      durationMs,
+      bytes: rec.bytes ?? null,
     };
     if (rec.status === 'completed' && rec.filePath) {
       try {
@@ -104,6 +118,18 @@ const listAll = async (options = {}) => {
 
   const result = [];
   for (const rec of recordings) {
+    // Sanity-cap durationMs. Old webhook bug stored completedAt as ns*1000
+    // (year 58000+), making completedAt - startedAt overflow into hundreds of
+    // hours. Anything > MAX_REASONABLE is bogus → null.
+    const MAX_REASONABLE_MS = 24 * 60 * 60 * 1000; // 24 hours
+    let durationMs = rec.durationMs ?? null;
+    if (durationMs == null && rec.startedAt && rec.completedAt) {
+      const ms = new Date(rec.completedAt).getTime() - new Date(rec.startedAt).getTime();
+      if (Number.isFinite(ms) && ms >= 0) durationMs = ms;
+    }
+    if (durationMs != null && (!Number.isFinite(durationMs) || durationMs < 0 || durationMs > MAX_REASONABLE_MS)) {
+      durationMs = null;
+    }
     const item = {
       id: rec._id?.toString(),
       meetingId: rec.meetingId,
@@ -113,6 +139,8 @@ const listAll = async (options = {}) => {
       status: rec.status,
       startedAt: rec.startedAt,
       completedAt: rec.completedAt,
+      durationMs,
+      bytes: rec.bytes ?? null,
     };
     if (rec.status === 'completed' && rec.filePath) {
       try {

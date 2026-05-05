@@ -4,6 +4,7 @@ import TeamMember from '../models/team.model.js';
 import Project from '../models/project.model.js';
 import ApiError from '../utils/ApiError.js';
 import { userIsAdmin } from '../utils/roleHelpers.js';
+import { hasApiPermission } from '../utils/permissionCheck.js';
 
 const escapeRegex = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const TEAM_GROUP_LIST_LIMIT_MAX = 200;
@@ -13,6 +14,18 @@ const isOwnerOrAdmin = async (user, resource) => {
   const admin = await userIsAdmin(user);
   if (admin) return true;
   return String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id);
+};
+
+/**
+ * Authoritative manage gate: platform super, owner, Administrator, or any active
+ * role granting teams.manage. Honours route-level permission guard.
+ */
+const canManageTeamGroup = async (user, resource) => {
+  if (!resource || !user) return false;
+  if (user.platformSuperUser) return true;
+  if (await userIsAdmin(user)) return true;
+  if (String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id)) return true;
+  return hasApiPermission(user, 'teams.manage');
 };
 
 const createTeamGroup = async (createdById, payload) => {
@@ -34,14 +47,18 @@ const queryTeamGroups = async (filter, options) => {
   const userId = filter.userId;
   const userRoleIds = filter.userRoleIds;
   const userEmail = filter.userEmail;
+  const apiPermissions = filter.apiPermissions instanceof Set ? filter.apiPermissions : new Set();
   delete filter.userRoleIds;
   delete filter.userId;
   delete filter.userEmail;
+  delete filter.apiPermissions;
 
   const isAdmin = await userIsAdmin({ roleIds: userRoleIds || [] });
+  /** Org-wide list when admin OR role grants teams.read / teams.manage. */
+  const canSeeAll = isAdmin || apiPermissions.has('teams.read') || apiPermissions.has('teams.manage');
   let finalFilter = { ...filter };
   /** Teams created by someone else still appear if the user is on that team's roster (email match). */
-  if (!isAdmin && userId) {
+  if (!canSeeAll && userId) {
     const uemail = String(userEmail || '').trim();
     let teamIdsImOn = [];
     if (uemail) {
@@ -98,7 +115,7 @@ const updateTeamGroupById = async (id, updateBody, currentUser) => {
   if (!team) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Team not found');
   }
-  const canUpdate = await isOwnerOrAdmin(currentUser, team);
+  const canUpdate = await canManageTeamGroup(currentUser, team);
   if (!canUpdate) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
@@ -113,7 +130,7 @@ const deleteTeamGroupById = async (id, currentUser) => {
   if (!team) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Team not found');
   }
-  const canDelete = await isOwnerOrAdmin(currentUser, team);
+  const canDelete = await canManageTeamGroup(currentUser, team);
   if (!canDelete) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }

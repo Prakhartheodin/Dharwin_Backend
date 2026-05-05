@@ -4,6 +4,7 @@ import Task from '../models/task.model.js';
 import Project from '../models/project.model.js';
 import ApiError from '../utils/ApiError.js';
 import { userIsAdmin } from '../utils/roleHelpers.js';
+import { hasApiPermission } from '../utils/permissionCheck.js';
 
 const TASK_LIST_LIMIT_MAX = 200;
 const escapeRegex = (s) => String(s || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -15,11 +16,43 @@ const sanitizeTaskWritePayload = (payload = {}) => {
   return next;
 };
 
+/**
+ * Recompute and persist Project.totalTasks + Project.completedTasks from the
+ * authoritative Task collection. Called after every Task create / update / status /
+ * delete that may touch a project so tiles stay in sync without a nightly resync.
+ * The Task model uses status === 'completed' for done. Pass null/undefined to skip.
+ */
+const recomputeProjectCounters = async (projectId) => {
+  if (!projectId) return;
+  const oid = mongoose.Types.ObjectId.isValid(String(projectId))
+    ? new mongoose.Types.ObjectId(String(projectId))
+    : null;
+  if (!oid) return;
+  const [total, completed] = await Promise.all([
+    Task.countDocuments({ projectId: oid }),
+    Task.countDocuments({ projectId: oid, status: 'completed' }),
+  ]);
+  await Project.updateOne({ _id: oid }, { $set: { totalTasks: total, completedTasks: completed } });
+};
+
 const isOwnerOrAdmin = async (user, resource) => {
   if (!resource) return false;
   const admin = await userIsAdmin(user);
   if (admin) return true;
   return String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id);
+};
+
+/**
+ * Authoritative manage gate: platform super, owner, Administrator, or any active
+ * role granting tasks.manage. Honours route-level permission guard so non-admin
+ * holders of project.tasks:create,edit,delete can assign / edit / delete tasks.
+ */
+const canManageTask = async (user, resource) => {
+  if (!resource || !user) return false;
+  if (user.platformSuperUser) return true;
+  if (await userIsAdmin(user)) return true;
+  if (String(resource.createdBy?._id || resource.createdBy) === String(user.id || user._id)) return true;
+  return hasApiPermission(user, 'tasks.manage');
 };
 
 const createTask = async (createdById, payload) => {
@@ -28,6 +61,8 @@ const createTask = async (createdById, payload) => {
     createdBy: createdById,
     ...safePayload,
   });
+  // Keep Project.totalTasks/completedTasks in sync whenever a task is added under a project.
+  await recomputeProjectCounters(task.projectId);
   await task.populate([
     { path: 'createdBy', select: 'name email' },
     { path: 'projectId', select: 'name' },
@@ -70,18 +105,22 @@ const queryTasks = async (filter, options) => {
 
   const userId = filter.userId;
   const userRoleIds = filter.userRoleIds;
+  const apiPermissions = filter.apiPermissions instanceof Set ? filter.apiPermissions : new Set();
   const assignedToMe = filter.assignedToMe === true || filter.assignedToMe === 'true';
   delete filter.userRoleIds;
   delete filter.userId;
+  delete filter.apiPermissions;
   delete filter.assignedToMe;
 
   const isAdmin = await userIsAdmin({ roleIds: userRoleIds || [] });
+  /** Org-wide list when admin OR role grants tasks.read / tasks.manage. */
+  const canSeeAll = isAdmin || apiPermissions.has('tasks.read') || apiPermissions.has('tasks.manage');
   let finalFilter = { ...filter };
-  
+
   if (assignedToMe && userId) {
     // Show only tasks assigned to the current user
     finalFilter.assignedTo = userId;
-  } else if (!isAdmin && userId) {
+  } else if (!canSeeAll && userId) {
     // Show tasks created by or assigned to the current user
     finalFilter = {
       $and: [
@@ -93,7 +132,7 @@ const queryTasks = async (filter, options) => {
 
   /** Tasks whose project was deleted but projectId still points nowhere — hide from all lists (incl. admin). */
   let orphanMatch = null;
-  if (isAdmin) {
+  if (canSeeAll) {
     orphanMatch = { projectId: { $ne: null } };
   } else if (userId && mongoose.Types.ObjectId.isValid(String(userId))) {
     const userOid = new mongoose.Types.ObjectId(String(userId));
@@ -161,13 +200,21 @@ const updateTaskById = async (id, updateBody, currentUser) => {
   if (!task) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   }
-  const canUpdate = await isOwnerOrAdmin(currentUser, task);
+  const canUpdate = await canManageTask(currentUser, task);
   if (!canUpdate) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
   const prevAssigned = new Set((task.assignedTo || []).map((u) => String(u._id || u)));
+  const prevProjectId = task.projectId?._id || task.projectId;
   Object.assign(task, sanitizeTaskWritePayload(updateBody));
   await task.save();
+  // Resync counters: status or projectId may have changed. If the task moved between
+  // projects, recompute both old and new so the previous tile drops the count.
+  const newProjectId = task.projectId?._id || task.projectId;
+  await recomputeProjectCounters(newProjectId);
+  if (prevProjectId && String(prevProjectId) !== String(newProjectId)) {
+    await recomputeProjectCounters(prevProjectId);
+  }
   await task.populate([
     { path: 'createdBy', select: 'name email' },
     { path: 'projectId', select: 'name' },
@@ -200,7 +247,7 @@ const updateTaskStatusById = async (id, status, order, currentUser) => {
   if (!task) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   }
-  const canUpdate = await isOwnerOrAdmin(currentUser, task);
+  const canUpdate = await canManageTask(currentUser, task);
   const isAssigned = (task.assignedTo || []).some(
     (u) => String(u._id || u) === String(currentUser.id || currentUser._id)
   );
@@ -213,6 +260,9 @@ const updateTaskStatusById = async (id, status, order, currentUser) => {
   task.status = status;
   if (typeof order === 'number') task.order = order;
   await task.save();
+  // Status moved to/from 'completed' affects Project.completedTasks. Recompute so the
+  // task board's project tile reflects the kanban move immediately.
+  await recomputeProjectCounters(task.projectId?._id || task.projectId);
   await task.populate([
     { path: 'createdBy', select: 'name email' },
     { path: 'projectId', select: 'name' },
@@ -257,11 +307,15 @@ const deleteTaskById = async (id, currentUser) => {
   if (!task) {
     throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   }
-  const canDelete = await isOwnerOrAdmin(currentUser, task);
+  const canDelete = await canManageTask(currentUser, task);
   if (!canDelete) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
+  const projectIdForResync = task.projectId?._id || task.projectId;
   await task.deleteOne();
+  // Resync after delete so the project tile decrements totalTasks (and completedTasks
+  // when a completed task is removed).
+  await recomputeProjectCounters(projectIdForResync);
   return task;
 };
 
@@ -285,7 +339,8 @@ const getTaskComments = async (taskId, currentUser) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Task not found');
   }
   const admin = await userIsAdmin(currentUser);
-  const allowed = admin || canCommentOnTask(task, currentUser.id || currentUser._id);
+  let allowed = admin || canCommentOnTask(task, currentUser.id || currentUser._id);
+  if (!allowed) allowed = await hasApiPermission(currentUser, 'tasks.read');
   if (!allowed) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }
@@ -299,7 +354,8 @@ const addTaskComment = async (taskId, content, currentUser) => {
   }
   const userId = currentUser.id || currentUser._id;
   const admin = await userIsAdmin(currentUser);
-  const allowed = admin || canCommentOnTask(task, userId);
+  let allowed = admin || canCommentOnTask(task, userId);
+  if (!allowed) allowed = await hasApiPermission(currentUser, 'tasks.read');
   if (!allowed) {
     throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');
   }

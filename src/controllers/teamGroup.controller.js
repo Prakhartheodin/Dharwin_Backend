@@ -21,6 +21,7 @@ const list = catchAsync(async (req, res) => {
   filter.userRoleIds = req.user.roleIds || [];
   filter.userId = req.user.id || req.user._id;
   filter.userEmail = req.user.email;
+  filter.apiPermissions = req.authContext?.permissions;
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await queryTeamGroups(filter, options);
   res.send(result);

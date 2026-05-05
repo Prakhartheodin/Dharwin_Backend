@@ -25,6 +25,7 @@ const list = catchAsync(async (req, res) => {
   filter.userId = req.user.id || req.user._id;
   filter.userEmail = req.user.email;
   filter.canViewCandidateMedia = req.authContext?.permissions?.has('candidates.read');
+  filter.apiPermissions = req.authContext?.permissions;
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await queryTeamMembers(filter, options);
   res.send(result);

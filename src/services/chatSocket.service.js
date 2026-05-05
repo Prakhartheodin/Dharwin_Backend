@@ -247,6 +247,25 @@ const initSocket = (httpServer) => {
               }
             }
           }).catch((err) => logger.warn(`disconnect call cleanup failed: ${err?.message}`));
+
+          // Cancel any ringing calls this user initiated — without this, the
+          // call sits in "ringing" forever when the caller closes their tab
+          // before the callee answers/declines.
+          const ioRef = io;
+          ChatCall.find({ caller: userId, status: 'ringing' }).lean().then(async (ringingCalls) => {
+            await Promise.all(ringingCalls.map(async (call) => {
+              const cancelled = await chatCallService.cancelCall(String(call._id), userId).catch(() => null);
+              if (!cancelled) return;
+              const participantIds = await chatService.getConversationParticipantIds(String(call.conversation)).catch(() => []);
+              participantIds.forEach((pid) => {
+                ioRef.to(`user:${String(pid)}`).emit('call:cancelled', {
+                  callId: String(call._id),
+                  conversationId: String(call.conversation),
+                  cancelledBy: userId,
+                });
+              });
+            }));
+          }).catch((err) => logger.warn(`disconnect ring cleanup failed: ${err?.message}`));
         }
       }
     });
@@ -391,6 +410,40 @@ const emitConversationDeleted = (conversationId, participantIds) => {
   });
 };
 
+/**
+ * Push a Bolna telephony CallRecord update to subscribed rooms.
+ * Targets:
+ *   - role:admin             — admin call dashboard sees every update
+ *   - call:candidate:<id>    — candidate-scoped subscribers (e.g. ATS profile)
+ *   - call:job:<id>          — job-scoped subscribers (e.g. job detail page)
+ * Called by callSync.service.js::applyEvent and ::seedRecord.
+ */
+const emitCallUpdate = (record) => {
+  if (!io || !record) return;
+  const id = record._id?.toString?.() || record.id || null;
+  const payload = {
+    id,
+    executionId: record.executionId,
+    status: record.status,
+    statusRank: record.statusRank,
+    statusUpdatedAt: record.statusUpdatedAt,
+    completedAt: record.completedAt,
+    duration: record.duration,
+    recordingUrl: record.recordingUrl,
+    fromPhoneNumber: record.fromPhoneNumber,
+    toPhoneNumber: record.toPhoneNumber,
+    recipientPhoneNumber: record.recipientPhoneNumber,
+    phone: record.phone,
+    businessName: record.businessName,
+    purpose: record.purpose,
+    agentId: record.agentId,
+    errorMessage: record.errorMessage,
+  };
+  io.to('role:admin').emit('call:update', payload);
+  if (record.candidate) io.to(`call:candidate:${record.candidate}`).emit('call:update', payload);
+  if (record.job) io.to(`call:job:${record.job}`).emit('call:update', payload);
+};
+
 export {
   initSocket,
   emitNewMessage,
@@ -401,6 +454,7 @@ export {
   emitMessageReacted,
   emitConversationUpdated,
   emitConversationDeleted,
+  emitCallUpdate,
   isUserOnline,
   getIO,
 };

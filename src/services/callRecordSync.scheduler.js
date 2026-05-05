@@ -1,190 +1,155 @@
+/**
+ * Reconciliation cron — safety net for missed Bolna webhooks.
+ *
+ * Two passes per tick:
+ *   1. reconcileStuckRecords  — for any CallRecord stuck in non-terminal state
+ *      for > 5 min, GET /execution/:id and feed the response through
+ *      callSyncService.applyEvent. Catches dropped webhooks.
+ *   2. backfillFromAgentList  — list recent Bolna agent executions and feed
+ *      them through applyEvent. Catches calls Bolna fired but never told us
+ *      about (e.g. webhook endpoint mis-configured).
+ *
+ * Both routes converge on callSyncService.applyEvent — the only writer of
+ * Bolna-derived fields. No more inline status-merge / field-overwrite logic.
+ */
+
 import logger from '../config/logger.js';
 import bolnaService from './bolna.service.js';
-import callRecordService from './callRecord.service.js';
+import callSyncService from './callSync.service.js';
+import CallRecord, { TERMINAL_STATUSES } from '../models/callRecord.model.js';
+import config from '../config/config.js';
 
-const STATUS_MAP = {
-  done: 'completed',
-  finished: 'completed',
-  ended: 'completed',
-  success: 'completed',
-  error: 'failed',
-  errored: 'failed',
-  cancelled: 'failed',
-  canceled: 'failed',
-  stopped: 'failed',
-  initiate: 'initiated',
-  initiated: 'initiated',
-  'no-answer': 'no_answer',
-  'call-disconnected': 'call_disconnected',
-  'in-progress': 'in_progress',
-  'balance-low': 'failed',
-  queued: 'initiated',
-  ringing: 'in_progress',
-};
+const STUCK_THRESHOLD_MS = 5 * 60 * 1000;
+const RECONCILE_LOOKBACK_DAYS = 30;
+const RECONCILE_BATCH = 100;
+const BACKFILL_PAGE_SIZE = 50;
+const BACKFILL_PAGES = 1;
 
-function normalizeStatus(status) {
-  if (!status) return null;
-  const s = String(status).toLowerCase().trim();
-  return STATUS_MAP[s] || s;
+async function reconcileStuckRecords() {
+  const stuckCutoff = new Date(Date.now() - STUCK_THRESHOLD_MS);
+  const lookbackCutoff = new Date(Date.now() - RECONCILE_LOOKBACK_DAYS * 24 * 60 * 60 * 1000);
+
+  const stuck = await CallRecord.find({
+    executionId: { $exists: true, $ne: null },
+    status: { $nin: [...TERMINAL_STATUSES] },
+    statusUpdatedAt: { $lte: stuckCutoff },
+    createdAt: { $gte: lookbackCutoff },
+  })
+    .select('executionId status')
+    .limit(RECONCILE_BATCH)
+    .lean();
+
+  if (!stuck.length) return { reconciled: 0, applied: 0, errors: 0 };
+
+  let applied = 0;
+  let errors = 0;
+  for (const rec of stuck) {
+    try {
+      const r = await bolnaService.getExecutionDetails(rec.executionId);
+      if (!r.success || !r.details) {
+        errors += 1;
+        continue;
+      }
+      // Bolna 404 → execution gone. Mark expired so we stop polling it.
+      if (
+        r.details.status === 'unknown' &&
+        typeof r.details.error_message === 'string' &&
+        r.details.error_message.includes('not found')
+      ) {
+        const result = await callSyncService.applyEvent(
+          {
+            id: rec.executionId,
+            execution_id: rec.executionId,
+            status: 'expired',
+            error_message: r.details.error_message,
+            updated_at: new Date().toISOString(),
+          },
+          'reconciliation'
+        );
+        if (result.applied) applied += 1;
+        continue;
+      }
+      const result = await callSyncService.applyEvent(
+        { ...r.details, id: r.details.id ?? r.details.execution_id ?? rec.executionId },
+        'reconciliation'
+      );
+      if (result.applied) applied += 1;
+    } catch (err) {
+      errors += 1;
+      logger.warn(`[callSync cron] reconcile failed for ${rec.executionId}: ${err.message}`);
+    }
+  }
+  return { reconciled: stuck.length, applied, errors };
 }
 
-async function runCallHistorySync() {
-  try {
-    await callRecordService.backfillFromBolna({ maxPages: 2 });
+async function backfillFromAgentList() {
+  const agents = [config.bolna?.agentId, config.bolna?.candidateAgentId].filter(Boolean);
+  const uniqueAgents = [...new Set(agents)];
+  let scanned = 0;
+  let applied = 0;
+  let errors = 0;
 
-    const recordsToSync = await callRecordService.findCallRecordsToSyncForCron({ limit: 1000 });
-    if (!recordsToSync.length) {
-      return;
-    }
-
-    const executionIds = [...new Set(recordsToSync.map((r) => r.executionId).filter(Boolean))];
-    const limitIds = executionIds.slice(0, 100);
-
-    for (const executionId of limitIds) {
+  for (const agentId of uniqueAgents) {
+    for (let page = 1; page <= BACKFILL_PAGES; page += 1) {
       try {
-        const result = await bolnaService.getExecutionDetails(executionId);
-        if (!result.success || !result.details) {
-          continue;
-        }
-        const executionData = result.details;
-
-        // Bolna returned 404 → execution expired/gone. Mark terminal so we stop re-polling.
-        if (executionData.status === 'unknown' && executionData.error_message?.includes('not found')) {
-          await callRecordService.updateCallRecordByExecutionId(executionId, {
-            status: 'expired',
-            errorMessage: executionData.error_message,
-          });
-          continue;
-        }
-        const data = executionData.data || executionData.execution || {};
-        const norm = callRecordService.normalizePayload({
-          ...executionData,
-          id: executionData.id ?? executionData.execution_id ?? executionId,
+        const r = await bolnaService.getAgentExecutions({
+          agentId,
+          page_number: page,
+          page_size: BACKFILL_PAGE_SIZE,
         });
-
-        const status = norm.status || normalizeStatus(executionData.status || executionData.smart_status);
-        let conversationDuration = norm.duration != null ? Number(norm.duration) : null;
-        if (conversationDuration != null && Number.isNaN(conversationDuration)) conversationDuration = null;
-        const recordingUrl = norm.recordingUrl || null;
-        const transcript =
-          norm.transcript ||
-          (norm.conversationTranscript && String(norm.conversationTranscript).trim()) ||
-          null;
-        const fromPhoneNumber = norm.fromPhoneNumber || null;
-        let errorMessage = executionData.error_message ?? data.error_message;
-        if (errorMessage && typeof errorMessage === 'string') {
-          try {
-            const parsed = JSON.parse(errorMessage);
-            if (parsed && parsed.message) errorMessage = parsed.message;
-          } catch {
-            /* ignore parse error */
-          }
+        if (!r.success || !Array.isArray(r.data)) {
+          errors += 1;
+          break;
         }
-        const endedStatuses = [
-          'completed',
-          'failed',
-          'no_answer',
-          'busy',
-          'stopped',
-          'error',
-          'call_disconnected',
-          'balance-low',
-        ];
-        const updatedAtRaw = executionData.updated_at ?? data.updated_at;
-        const initiatedAtRaw = executionData.initiated_at ?? data.initiated_at;
-        const completedAt = status && endedStatuses.includes(status)
-          ? updatedAtRaw
-            ? new Date(updatedAtRaw)
-            : initiatedAtRaw
-              ? new Date(initiatedAtRaw)
-              : new Date()
-          : null;
-
-        const userData = executionData.user_data ?? data.user_data ?? {};
-
-        const recordsWithThisExecution = recordsToSync.filter((r) => r.executionId === executionId);
-        for (const record of recordsWithThisExecution) {
-          const statusChanged = status && status !== record.status;
-          const isTerminal = ['failed', 'error', 'completed', 'no_answer', 'busy', 'call_disconnected', 'expired'].includes(record.status);
-          const hasNewData =
-            (errorMessage && errorMessage !== record.errorMessage) ||
-            (recordingUrl && recordingUrl !== record.recordingUrl) ||
-            (transcript && transcript !== (record.transcript || record.conversationTranscript)) ||
-            (conversationDuration != null && conversationDuration !== record.duration) ||
-            (fromPhoneNumber && fromPhoneNumber !== record.fromPhoneNumber);
-          const shouldBackfillFrom = fromPhoneNumber && !record.fromPhoneNumber;
-
-          if (statusChanged || (isTerminal && hasNewData) || shouldBackfillFrom) {
-            const updateData = {};
-            if (statusChanged) updateData.status = status;
-            if (fromPhoneNumber && (!record.fromPhoneNumber || fromPhoneNumber !== record.fromPhoneNumber)) {
-              updateData.fromPhoneNumber = fromPhoneNumber;
-            }
-            if (conversationDuration != null && conversationDuration !== record.duration) {
-              updateData.duration = conversationDuration;
-            }
-            if (recordingUrl && recordingUrl !== record.recordingUrl) updateData.recordingUrl = recordingUrl;
-            if (transcript && transcript !== record.transcript) updateData.transcript = transcript;
-            if (
-              (status === 'failed' ||
-                status === 'error' ||
-                record.status === 'failed' ||
-                record.status === 'error') &&
-              errorMessage
-            ) {
-              updateData.errorMessage = String(errorMessage);
-            }
-            if (endedStatuses.includes(status || record.status) && !record.completedAt && completedAt) {
-              updateData.completedAt = completedAt;
-            }
-            if (userData.organisation) {
-              updateData.businessName = String(userData.organisation).trim();
-            } else if (userData.name) {
-              updateData.businessName = String(userData.name).trim();
-            } else if (userData.candidate_name) {
-              updateData.businessName = String(userData.candidate_name).trim();
-            }
-            const extracted = executionData.extracted_data ?? data.extracted_data;
-            if (extracted && typeof extracted === 'object') {
-              updateData.extractedData = extracted;
-            }
-            const execAgentId = norm.agentId ?? executionData.agent_id ?? executionData.agentId ?? data.agent_id;
-            if (execAgentId && (!record.agentId || record.agentId !== execAgentId)) {
-              updateData.agentId = String(execAgentId).trim();
-            }
-
-            if (Object.keys(updateData).length > 0) {
-              await callRecordService.updateCallRecordByExecutionId(executionId, updateData);
-            }
-          }
+        scanned += r.data.length;
+        for (const exec of r.data) {
+          const payload = {
+            ...exec,
+            id: exec.id ?? exec.execution_id,
+            agent_id: exec.agent_id ?? agentId,
+          };
+          const result = await callSyncService.applyEvent(payload, 'backfill');
+          if (result.applied) applied += 1;
         }
+        if (!r.has_more) break;
       } catch (err) {
-        logger.error(`Failed to sync execution ${executionId}: ${err.message}`);
+        errors += 1;
+        logger.warn(`[callSync cron] backfill page ${page} agent=${agentId} failed: ${err.message}`);
       }
     }
+  }
+  return { scanned, applied, errors };
+}
 
-    await callRecordService.fillMissingBusinessNameFromJobs(50);
+export async function runCallHistorySync() {
+  try {
+    const reconcile = await reconcileStuckRecords();
+    const backfill = await backfillFromAgentList();
+    if (reconcile.reconciled || backfill.applied || reconcile.errors || backfill.errors) {
+      logger.info(
+        `[callSync cron] reconcile=${reconcile.reconciled}/applied=${reconcile.applied}/err=${reconcile.errors} ` +
+          `backfill=${backfill.scanned}/applied=${backfill.applied}/err=${backfill.errors}`
+      );
+    }
   } catch (err) {
-    logger.error(`Error in scheduled Call Records sync: ${err.message}`);
+    logger.error(`[callSync cron] tick failed: ${err.message}`);
   }
 }
 
-function startCallRecordSyncScheduler(intervalMinutes = 1) {
-  const intervalMs = intervalMinutes * 60 * 1000;
+export function startCallRecordSyncScheduler(intervalMinutes = 1) {
+  const intervalMs = Math.max(1, Number(intervalMinutes) || 1) * 60 * 1000;
+  // Fire-and-forget initial run; subsequent runs on interval.
   runCallHistorySync();
   const id = setInterval(runCallHistorySync, intervalMs);
-  logger.info(`Call history (Bolna) sync scheduler started (every ${intervalMinutes} min)`);
+  logger.info(`[callSync cron] scheduler started (every ${intervalMinutes} min)`);
   return id;
 }
 
-function stopCallRecordSyncScheduler(id) {
+export function stopCallRecordSyncScheduler(id) {
   if (id) {
     clearInterval(id);
-    logger.info('Call history (Bolna) sync scheduler stopped');
+    logger.info('[callSync cron] scheduler stopped');
     return true;
   }
   return false;
 }
-
-export { runCallHistorySync, startCallRecordSyncScheduler, stopCallRecordSyncScheduler };
-

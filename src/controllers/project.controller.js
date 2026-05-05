@@ -22,6 +22,7 @@ const list = catchAsync(async (req, res) => {
   const filter = pick(req.query, ['search', 'status', 'priority', 'mine']);
   filter.userRoleIds = req.user.roleIds || [];
   filter.userId = req.user.id || req.user._id;
+  filter.apiPermissions = req.authContext?.permissions;
 
   const options = pick(req.query, ['sortBy', 'limit', 'page']);
   const result = await queryProjects(filter, options);
@@ -34,9 +35,12 @@ const get = catchAsync(async (req, res) => {
     throw new ApiError(httpStatus.NOT_FOUND, 'Project not found');
   }
 
-  const isAdmin = await userIsAdmin(req.user);
+  const isAdmin = req.user.platformSuperUser || await userIsAdmin(req.user);
   const isOwner = String(project.createdBy?._id || project.createdBy) === String(req.user.id || req.user._id);
-  if (!isAdmin && !isOwner) {
+  /** Anyone with projects.read (or projects.manage) granted via role gets the detail view. */
+  const apiPerms = req.authContext?.permissions;
+  const hasReadPerm = !!apiPerms && (apiPerms.has('projects.read') || apiPerms.has('projects.manage'));
+  if (!isAdmin && !isOwner && !hasReadPerm) {
     const viaAssignedTask = await userCanReadProjectViaAssignedTask(project, req.user);
     if (!viaAssignedTask) {
       throw new ApiError(httpStatus.FORBIDDEN, 'Forbidden');

@@ -1,32 +1,48 @@
+/**
+ * Recording reconciliation cron — safety net for missed webhooks and stuck egress.
+ *
+ * Tightened thresholds vs prior version (was 15min interval, 2h stale):
+ *   - 2 min interval
+ *   - 5 min "stale" cutoff for non-terminal rows
+ *   - 8 h hard force-resolve for any row still active
+ *
+ * Resolves rows in any non-terminal state (pending/recording/stopping/finalizing)
+ * by querying LiveKit egress and routing the result through recordingSync.
+ *
+ * Pending rows: rare. They mean startRoomCompositeEgress succeeded but
+ * attachEgressId Mongo write failed. We have no egressId — mark missing.
+ */
+
 import { EgressStatus } from 'livekit-server-sdk';
 import Recording from '../models/recording.model.js';
+import recordingSyncService from './recordingSync.service.js';
 import logger from '../config/logger.js';
 
-// Recordings stuck in 'recording' longer than this are considered stale
-const STALE_THRESHOLD_MS = 2 * 60 * 60 * 1000; // 2 hours
-// If egress is somehow still active after this long, force-resolve as missing
-const FORCE_RESOLVE_THRESHOLD_MS = 8 * 60 * 60 * 1000; // 8 hours
+const STALE_THRESHOLD_MS = 5 * 60 * 1000;
+const FORCE_RESOLVE_THRESHOLD_MS = 8 * 60 * 60 * 1000;
+const RECONCILE_INTERVAL_MS = 2 * 60 * 1000;
 
 let intervalId = null;
 
+const NON_TERMINAL = ['pending', 'recording', 'stopping', 'finalizing'];
+
 /**
- * Resolve a single stale recording by querying LiveKit egress API.
- * Returns the resolved status string, or null if skipped.
+ * Resolve a single stale recording. Returns final status string or null if skipped.
  */
 const resolveStaleRecording = async (recording, egressClient) => {
   const { egressId, _id } = recording;
 
-  // 🔥 Guard: missing egressId
+  // Pending row with no egressId: orphan from a failed two-phase start.
   if (!egressId) {
-    logger.warn('[Recording scheduler] Missing egressId', {
-      recordingId: String(_id),
-    });
-
     await Recording.findByIdAndUpdate(_id, {
-      status: 'missing',
-      completedAt: new Date(),
+      $set: {
+        status: 'missing',
+        statusRank: 10,
+        completedAt: new Date(),
+        lastError: 'pending row with no egressId; egress start likely failed silently',
+      },
     });
-
+    logger.warn('[Recording cron] Pending row → missing', { recordingId: String(_id) });
     return 'missing';
   }
 
@@ -38,117 +54,99 @@ const resolveStaleRecording = async (recording, egressClient) => {
     const notFound =
       err?.message?.toLowerCase().includes('not found') ||
       err?.message?.toLowerCase().includes('cannot be found');
-
     if (!notFound) {
-      logger.warn('[Recording scheduler] Egress lookup error', {
-        egressId,
-        error: err.message,
-      });
+      logger.warn('[Recording cron] Egress lookup error', { egressId, error: err.message });
       return null;
     }
-    // Egress purged from LiveKit
   }
 
   const now = new Date();
 
-  // 🔥 If egress doesn't exist anymore → mark missing
+  // Egress purged from LiveKit → mark missing.
   if (!egressInfo) {
-    await Recording.findByIdAndUpdate(_id, {
-      status: 'missing',
+    await recordingSyncService.transitionRecording(egressId, 'missing', {
       completedAt: now,
+      lastError: 'Egress purged from LiveKit',
     });
-
-    logger.info('[Recording scheduler] Resolved purged egress → missing', {
-      egressId,
-      recordingId: String(_id),
-    });
-
+    logger.info('[Recording cron] Resolved purged egress → missing', { egressId, recordingId: String(_id) });
     return 'missing';
   }
 
-  const status = egressInfo.status;
-
+  const egressStatus = egressInfo.status;
   const isTerminal =
-    status === EgressStatus.EGRESS_COMPLETE ||
-    status === EgressStatus.EGRESS_FAILED ||
-    status === EgressStatus.EGRESS_ABORTED ||
-    status === EgressStatus.EGRESS_LIMIT_REACHED ||
-    Number(status) >= 3;
+    egressStatus === EgressStatus.EGRESS_COMPLETE ||
+    egressStatus === EgressStatus.EGRESS_FAILED ||
+    egressStatus === EgressStatus.EGRESS_ABORTED ||
+    egressStatus === EgressStatus.EGRESS_LIMIT_REACHED ||
+    Number(egressStatus) >= 3;
 
-  // 🔥 Handle non-terminal state safely
   if (!isTerminal) {
     const startedAt = new Date(recording.startedAt);
-
-    if (isNaN(startedAt.getTime())) {
-      logger.warn('[Recording scheduler] Invalid startedAt, forcing resolve', {
-        recordingId: String(_id),
-        startedAt: recording.startedAt,
+    if (Number.isNaN(startedAt.getTime())) {
+      await recordingSyncService.transitionRecording(egressId, 'missing', {
+        completedAt: now,
+        lastError: 'Invalid startedAt during reconcile',
       });
-
-      await Recording.findByIdAndUpdate(_id, {
-        status: 'missing',
-        completedAt: new Date(),
-      });
-
       return 'missing';
     }
-
     const age = now - startedAt;
-
-    if (age < FORCE_RESOLVE_THRESHOLD_MS) return null;
-
-    logger.warn(
-      '[Recording scheduler] Force-resolving active egress older than 8h',
-      { egressId }
-    );
+    if (age < FORCE_RESOLVE_THRESHOLD_MS) {
+      // Still active and within window — leave it. Next webhook should resolve.
+      return null;
+    }
+    logger.warn('[Recording cron] Force-resolving active egress > 8h', { egressId });
   }
 
-  // 🔥 Safe endedAt handling
-  const endedAtMs = egressInfo.endedAt
-    ? Number(egressInfo.endedAt) * 1000
-    : NaN;
-
-  const endedAt =
-    Number.isFinite(endedAtMs) && endedAtMs > 0
-      ? new Date(endedAtMs)
-      : now;
-
-  const safeCompletedAt =
-    endedAt instanceof Date && !isNaN(endedAt.getTime())
-      ? endedAt
-      : new Date();
-
+  // Terminal in LiveKit; figure out filePath + status.
   const fileResults =
-    egressInfo.fileResults ||
-    egressInfo.file_results ||
-    egressInfo.fileResultsList;
+    egressInfo.fileResults || egressInfo.file_results || egressInfo.fileResultsList;
+  const f0 = fileResults?.[0] || egressInfo.files?.[0] || {};
+  const filePath = f0.filename || f0.filepath || f0.location;
+  const bytes = Number(f0.size || f0.bytes || 0) || null;
 
-  const filePath =
-    fileResults?.[0]?.filename ||
-    fileResults?.[0]?.filepath ||
-    fileResults?.[0]?.location ||
-    egressInfo.files?.[0]?.filename ||
-    egressInfo.files?.[0]?.location;
+  // LiveKit endedAt: ns (bigint/string), ms, or seconds. Branch by magnitude
+  // to avoid the 1970-date bug from the prior unconditional ns conversion.
+  const endedAtRaw = egressInfo.endedAt;
+  let endedMs = null;
+  if (endedAtRaw != null && endedAtRaw !== '') {
+    let n;
+    if (typeof endedAtRaw === 'bigint') {
+      n = Number(endedAtRaw);
+    } else if (typeof endedAtRaw === 'number') {
+      n = endedAtRaw;
+    } else {
+      const s = String(endedAtRaw).trim();
+      if (/^\d+(\.\d+)?$/.test(s)) {
+        try { n = Number(BigInt(s.split('.')[0])); } catch { n = Number(s); }
+      } else {
+        const parsed = Date.parse(s);
+        n = Number.isNaN(parsed) ? null : parsed;
+      }
+    }
+    if (Number.isFinite(n) && n > 0) {
+      if (n >= 1e16) endedMs = Math.floor(n / 1e6);       // ns
+      else if (n >= 1e10) endedMs = Math.floor(n);        // ms
+      else endedMs = Math.floor(n * 1000);                // seconds
+    }
+  }
+  const completedAt = endedMs ? new Date(endedMs) : now;
 
-  const resolvedStatus = filePath ? 'completed' : 'missing';
+  if (filePath) {
+    await recordingSyncService.transitionRecording(egressId, 'completed', {
+      completedAt,
+      filePath,
+      bytes,
+    });
+    logger.info('[Recording cron] Resolved → completed', { egressId, recordingId: String(_id) });
+    return 'completed';
+  }
 
-  const update = {
-    status: resolvedStatus,
-    completedAt: safeCompletedAt,
-  };
-
-  if (filePath) update.filePath = filePath;
-
-  await Recording.findByIdAndUpdate(_id, update);
-
-  logger.info('[Recording scheduler] Resolved stale egress', {
-    egressId,
-    recordingId: String(_id),
-    resolvedStatus,
-    filePath: filePath || null,
+  await recordingSyncService.transitionRecording(egressId, 'missing', {
+    completedAt,
+    lastError: 'Terminal in LiveKit but no filePath in egressInfo',
   });
-
-  return resolvedStatus;
+  logger.info('[Recording cron] Resolved → missing (no filePath)', { egressId, recordingId: String(_id) });
+  return 'missing';
 };
 
 export const runRecoveryPass = async (egressClient) => {
@@ -157,54 +155,43 @@ export const runRecoveryPass = async (egressClient) => {
   const threshold = new Date(Date.now() - STALE_THRESHOLD_MS);
 
   const stale = await Recording.find({
-    status: 'recording',
+    status: { $in: NON_TERMINAL },
     startedAt: { $lt: threshold },
-  }).lean();
+  })
+    .limit(200)
+    .lean();
 
   if (!stale.length) return;
 
-  logger.info(
-    `[Recording scheduler] Found ${stale.length} stale recording(s) — resolving`
-  );
+  logger.info(`[Recording cron] ${stale.length} stale row(s) — resolving`);
 
   let completed = 0;
   let missing = 0;
   let skipped = 0;
 
-  // 🔥 Safe loop (no crash)
   for (const rec of stale) {
     try {
       const result = await resolveStaleRecording(rec, egressClient);
-
-      if (result === 'completed') completed++;
-      else if (result === 'missing') missing++;
-      else skipped++;
+      if (result === 'completed') completed += 1;
+      else if (result === 'missing') missing += 1;
+      else skipped += 1;
     } catch (err) {
-      logger.error('[Recording scheduler] Failed resolving recording', {
-        recordingId: String(rec._id),
-        error: err.message,
-      });
-      skipped++;
+      logger.error('[Recording cron] resolve failed', { recordingId: String(rec._id), error: err.message });
+      skipped += 1;
     }
   }
 
-  logger.info(
-    `[Recording scheduler] Recovery pass done — completed:${completed} missing:${missing} skipped:${skipped}`
-  );
+  logger.info(`[Recording cron] pass done — completed:${completed} missing:${missing} skipped:${skipped}`);
 };
 
 export const startRecordingScheduler = (egressClient) => {
   if (intervalId) return;
-
   runRecoveryPass(egressClient);
-
-  intervalId = setInterval(
-    () => runRecoveryPass(egressClient),
-    15 * 60 * 1000
-  );
-
+  intervalId = setInterval(() => runRecoveryPass(egressClient), RECONCILE_INTERVAL_MS);
   logger.info(
-    '[Recording scheduler] Started (interval: 15 min, stale threshold: 2h)'
+    `[Recording cron] started (interval: ${RECONCILE_INTERVAL_MS / 60000} min, stale: ${
+      STALE_THRESHOLD_MS / 60000
+    } min)`
   );
 };
 
@@ -212,6 +199,6 @@ export const stopRecordingScheduler = () => {
   if (intervalId) {
     clearInterval(intervalId);
     intervalId = null;
-    logger.info('[Recording scheduler] Stopped');
+    logger.info('[Recording cron] stopped');
   }
 };

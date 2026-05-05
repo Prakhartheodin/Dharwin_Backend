@@ -631,9 +631,16 @@ export async function applyTaskBreakdown(projectId, user, { tasks, idempotencyKe
         created.push(task);
       }
 
+      // Recompute Project.totalTasks/completedTasks from the authoritative Task
+      // collection inside the same transaction. Replaces a fragile $inc that drifted
+      // when external paths (single-task create, deletes, status changes) bypassed it.
+      const [totalCount, completedCount] = await Promise.all([
+        Task.countDocuments({ projectId: projectOid }).session(session).exec(),
+        Task.countDocuments({ projectId: projectOid, status: 'completed' }).session(session).exec(),
+      ]);
       await Project.updateOne(
         { _id: projectOid },
-        { $inc: { totalTasks: created.length }, $set: { updatedAt: new Date() } }
+        { $set: { totalTasks: totalCount, completedTasks: completedCount, updatedAt: new Date() } }
       ).session(session).exec();
 
       const populatedCreated = await Task.find({ _id: { $in: created.map((t) => t._id) } })

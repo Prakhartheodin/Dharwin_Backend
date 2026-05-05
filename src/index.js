@@ -16,6 +16,10 @@ import {
 } from './services/callRecordSync.scheduler.js';
 import { startMeetingScheduler, stopMeetingScheduler } from './services/meeting.scheduler.js';
 import { startRecordingScheduler, stopRecordingScheduler } from './services/recording.scheduler.js';
+import {
+  startRecordingDiscoveryScheduler,
+  stopRecordingDiscoveryScheduler,
+} from './services/recordingDiscovery.scheduler.js';
 import { getEgressClient } from './services/livekit.service.js';
 import applicationVerificationCallScheduler from './services/applicationVerificationCall.scheduler.js';
 import { logBolnaAgentConfigHealth } from './utils/bolnaAgentConfig.js';
@@ -27,6 +31,7 @@ let candidateSchedulerId;
 let jobVerificationSchedulerId;
 let callRecordSyncSchedulerId;
 let applicationVerificationSchedulerId;
+let recordingDiscoverySchedulerId;
 const port = config.port || process.env.PORT || 3000;
 
 mongoose
@@ -51,6 +56,7 @@ mongoose
         applicationVerificationSchedulerId = applicationVerificationCallScheduler.startApplicationVerificationCallScheduler(2);
         startMeetingScheduler();
         startRecordingScheduler(getEgressClient());
+        recordingDiscoverySchedulerId = startRecordingDiscoveryScheduler();
         registerEmbeddingHooks();
         runEmbeddingBackfill().catch((err) => logger.error(`[EmbeddingSync] backfill failed: ${err?.stack || err?.message || String(err)}`));
       }
@@ -72,6 +78,7 @@ const exitHandler = () => {
       applicationVerificationCallScheduler.stopApplicationVerificationCallScheduler(applicationVerificationSchedulerId);
       stopMeetingScheduler();
       stopRecordingScheduler();
+      stopRecordingDiscoveryScheduler(recordingDiscoverySchedulerId);
       process.exit(1);
     });
   } else {

@@ -88,7 +88,16 @@ const cancelCall = async (callId, callerId) => {
 
 const endCall = async (callId) => {
   const call = await ChatCall.findById(callId).lean();
-  if (!call || call.status !== 'ongoing') return null;
+  if (!call) return null;
+  // Ringing-but-never-answered → missed (caller hung up before callee answered).
+  if (call.status === 'ringing') {
+    return ChatCall.findOneAndUpdate(
+      { _id: callId, status: 'ringing' },
+      { status: 'missed', endedAt: new Date() },
+      { new: true }
+    ).lean();
+  }
+  if (call.status !== 'ongoing') return null;
   const endedAt = new Date();
   const duration = call.startedAt
     ? Math.round((endedAt.getTime() - new Date(call.startedAt).getTime()) / 1000)
@@ -96,4 +105,48 @@ const endCall = async (callId) => {
   return ChatCall.findByIdAndUpdate(callId, { status: 'completed', endedAt, duration }, { new: true }).lean();
 };
 
-export { mintP2PToken, initiateCall, acceptCall, declineCall, cancelCall, endCall };
+/**
+ * Reconcile stuck calls. Two failure modes:
+ *   - ringing > RING_TIMEOUT_MS: callee never answered, neither side declined
+ *     (e.g. browser crash, network drop). Mark missed.
+ *   - ongoing > ONGOING_MAX_MS without endedAt: end signal lost. Force complete.
+ *
+ * Called inline from chat.service.js::listCalls so the UI is always consistent
+ * without needing a dedicated cron.
+ */
+const RING_TIMEOUT_MS = 60 * 1000;
+const ONGOING_MAX_MS = 6 * 60 * 60 * 1000;
+
+const expireStaleCalls = async () => {
+  const now = Date.now();
+  const ringCutoff = new Date(now - RING_TIMEOUT_MS);
+  const ongoingCutoff = new Date(now - ONGOING_MAX_MS);
+
+  const [ringRes, ongoingRes] = await Promise.all([
+    ChatCall.updateMany(
+      { status: 'ringing', createdAt: { $lte: ringCutoff } },
+      { $set: { status: 'missed', endedAt: new Date() } }
+    ),
+    ChatCall.updateMany(
+      { status: 'ongoing', startedAt: { $lte: ongoingCutoff }, endedAt: null },
+      [
+        {
+          $set: {
+            status: 'completed',
+            endedAt: '$$NOW',
+            duration: {
+              $round: [{ $divide: [{ $subtract: ['$$NOW', '$startedAt'] }, 1000] }, 0],
+            },
+          },
+        },
+      ]
+    ),
+  ]);
+
+  return {
+    ringExpired: ringRes?.modifiedCount || 0,
+    ongoingExpired: ongoingRes?.modifiedCount || 0,
+  };
+};
+
+export { mintP2PToken, initiateCall, acceptCall, declineCall, cancelCall, endCall, expireStaleCalls };
